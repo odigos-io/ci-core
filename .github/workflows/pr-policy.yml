@@ -1,0 +1,15 @@
+# .github/workflows/pr-policy.yml (caller)
+name: PR Policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  require-linear:
+    uses: odigos/ci-core/.github/workflows/require-linear.yml@v1
+    with:
+      # Optional overrides; omit to use defaults defined in reusable workflow.
+      # linear-prefix-regex: '(CORE-|PLAT-|PRD-|RUN-|GEN-)'
+      # bot-accounts-json: '["dependabot[bot]","renovate[bot]","odigos-bot"]'
+    secrets: inherit
