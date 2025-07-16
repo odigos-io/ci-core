@@ -1,0 +1,94 @@
+name: Publish / Advance Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver tag to create (e.g., v1.0.2). Must start with 'v'."
+        required: true
+        type: string
+      dry_run:
+        description: "Set true to validate but NOT push tags."
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+
+    steps:
+      - name: Validate version input
+        id: validate
+        run: |
+          if [[ -z "${VERSION}" ]]; then
+            echo "::error::version is required"; exit 1
+          fi
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version '${VERSION}' is not SemVer 'vMAJOR.MINOR.PATCH'"; exit 1
+          fi
+          echo "validated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main (full history & tags)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fail if version tag already exists remotely
+        run: |
+          if git rev-parse "${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag ${VERSION} already exists in repo. Aborting."
+            exit 1
+          fi
+
+      - name: Show current HEAD & existing v1 tag (if any)
+        run: |
+          echo "HEAD commit: $(git rev-parse HEAD)"
+          git show-ref --tags | grep -E 'refs/tags/v1$' || echo "No v1 tag yet."
+
+      - name: Create annotated version tag locally
+        run: |
+          git tag -a "${VERSION}" -m "Release ${VERSION} (created by GH Actions run ${GITHUB_RUN_ID})" HEAD
+
+      - name: Move (create or force-update) major v1 tag locally
+        run: |
+          if git rev-parse v1 >/dev/null 2>&1; then
+            git tag -f -a v1 -m "Advance v1 -> ${VERSION} (run ${GITHUB_RUN_ID})" HEAD
+          else
+            git tag -a v1 -m "Initial v1 -> ${VERSION} (run ${GITHUB_RUN_ID})" HEAD
+          fi
+
+      - name: Push tags (unless dry run)
+        if: ${{ env.DRY_RUN != 'true' }}
+        run: |
+          # push specific tags (safer than --tags)
+          git push origin "${VERSION}"
+          git push --force origin "v1"
+
+      - name: Dry run summary
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: |
+          echo "Dry run enabled. NOT pushing tags."
+          git show-ref --tags | grep -E "(${VERSION}|v1)$" || true
+
+      - name: Set outputs
+        id: out
+        run: |
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      commit_sha: ${{ steps.out.outputs.commit_sha }}
+      version: ${{ steps.out.outputs.version }}
