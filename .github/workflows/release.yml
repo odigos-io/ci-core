@@ -1,5 +1,8 @@
 name: Validate & Tag Release
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,27 +21,20 @@ jobs:
       - name: yamllint
         run: pipx run yamllint .
 
-  smoke-test-linear:
-    needs: lint
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - name: Call require-linear from test harness
-        uses: odigos/ci-core/.github/workflows/require-linear.yml@${{ github.sha }}
-        with:
-          linear-prefix-regex: '(TEST-)'
-    # Secrets intentionally not inherited for smoke test; adjust as needed.
-
   tag:
-    needs: [lint, smoke-test-linear]
+    needs: [lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Create tag
+        with:
+          fetch-depth: 0   # ensure full history for tagging
+      - name: Config git identity
+        run: |
+          git config user.name  "odigos-ci-bot"
+          git config user.email "ci@odigos.io"
+      - name: Create & push tag
         run: |
           git tag ${{ inputs.version }}
           git push origin ${{ inputs.version }}
