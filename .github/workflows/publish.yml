@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Semver tag to create (e.g., v1.0.2). Must start with 'v'."
+        description: "Semver tag (vMAJOR.MINOR.PATCH)"
         required: true
         type: string
       dry_run:
-        description: "Validate only; don't create/push tags."
+        description: "Validate only; don't push tags"
         required: false
         default: "false"
         type: choice
         options: ["false","true"]
 
 permissions:
-  contents: write  # needed to push tags. Adjust if using a PAT instead.
+  contents: read  # we push with the App token; no need for write on GITHUB_TOKEN
 
 jobs:
   publish:
@@ -26,13 +26,9 @@ jobs:
 
     steps:
       - name: Validate version input
-        id: validate
         run: |
-          if [[ -z "${VERSION}" ]]; then
-            echo "::error::version is required"; exit 1
-          fi
           if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::'${VERSION}' not SemVer vMAJOR.MINOR.PATCH"; exit 1
+            echo "::error::Invalid version '${VERSION}'"; exit 1
           fi
 
       - name: Checkout main w/ full history & tags
@@ -41,41 +37,47 @@ jobs:
           ref: main
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false   # IMPORTANT: don't use GITHUB_TOKEN for pushes
 
-      - name: Configure git identity
+      - name: Configure git identity (tag metadata)
         run: |
-          git config user.name  "odigos-ci-bot"
-          git config user.email "ci@odigos.io"
+          git config user.name  "odigos-ci"
+          git config user.email "odigos-ci@users.noreply.github.com"
 
       - name: Fail if version tag already exists
         run: |
           if git rev-parse "${VERSION}" >/dev/null 2>&1; then
-            echo "::error::Tag ${VERSION} already exists. Aborting."; exit 1
+            echo "::error::Tag ${VERSION} already exists"; exit 1
           fi
-
-      - name: Show current HEAD & existing v1 tag
-        run: |
-          echo "HEAD: $(git rev-parse HEAD)"
-          git show-ref --tags | grep -E 'refs/tags/v1$' || echo "No v1 tag yet."
 
       - name: Create tags (local only)
-        if: ${{ env.DRY_RUN != 'true' }}
         run: |
-          git tag -a "${VERSION}" -m "Release ${VERSION} (run ${GITHUB_RUN_ID})" HEAD
+          git tag -a "${VERSION}" -m "Release ${VERSION}" HEAD
           if git rev-parse v1 >/dev/null 2>&1; then
-            git tag -f -a v1 -m "Advance v1 -> ${VERSION} (run ${GITHUB_RUN_ID})" HEAD
+            git tag -f -a v1 -m "Advance v1 -> ${VERSION}" HEAD
           else
-            git tag -a v1 -m "Initial v1 -> ${VERSION} (run ${GITHUB_RUN_ID})" HEAD
+            git tag -a v1 -m "Initial v1 -> ${VERSION}" HEAD
           fi
 
-      - name: Dry-run show would-be tags
-        if: ${{ env.DRY_RUN == 'true' }}
-        run: |
-          echo "Dry run: no tags created. Would have created ${VERSION} and moved v1."
-          echo "HEAD to tag: $(git rev-parse HEAD)"
-
-      - name: Push tags
+      - name: Get odigos-ci App token
         if: ${{ env.DRY_RUN != 'true' }}
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.ODIGOS_APP_ID }}
+          private-key: ${{ secrets.ODIGOS_APP_PRIVATE_KEY }}
+          # installation-id optional; auto-detect when running in installed repo
+
+      - name: Push tags (App)
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          git remote set-url origin "https://x-access-token:${GH_APP_TOKEN}@github.com/odigos-io/ci-core.git"
           git push origin "${VERSION}"
           git push --force origin "v1"
+
+      - name: Dry run summary
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: |
+          echo "Dry run only; not pushing ${VERSION} or v1."
