@@ -23,7 +23,7 @@ on:
 jobs:
   linear-check:
     # Run only for repos in org AND when caller's triggering event was pull_request
-    if: ${{ github.repository_owner == 'odigos' && github.event_name == 'pull_request' }}
+    if: ${{ github.repository_owner == 'odigos-io' && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
