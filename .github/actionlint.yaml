@@ -1,0 +1,15 @@
+# actionlint config for Odigos Shared CI
+# Docs: https://github.com/rhysd/actionlint/blob/main/docs/config.md
+
+self-hosted-runner:
+  labels: []   # add 'odigos-linux' etc if/when you define custom labels
+
+# If you want to allow specific config vars in workflows, list them:
+# config-variables:
+#   - ODIGOS_ENV
+
+# Ignore warnings in internal template dir (if you add one later)
+# paths:
+#   ".github/workflows/_internal-templates/**":
+#     ignore:
+#       - "label \".+\" is unknown"

@@ -1,6 +1,9 @@
 # .github/workflows/require-linear.yml
 name: Require Linked Linear Issue
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -19,26 +22,22 @@ on:
 
 jobs:
   linear-check:
-    # Safety: only run for repos in the odigos org (prevents external abuse of your public CI repo).
-    if: ${{ github.repository_owner == 'odigos' }}
+    # Run only for repos in org AND when caller's triggering event was pull_request
+    if: ${{ github.repository_owner == 'odigos' && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
       statuses: write
 
     steps:
-      - name: Identify caller & short-circuit for bots
-        id: gate
-        run: |
-          echo "actor=${{ github.actor }}" >> "$GITHUB_OUTPUT"
-          echo "is-bot=${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.actor) }}" >> "$GITHUB_OUTPUT"
-
-      - name: Skip message
-        if: ${{ steps.gate.outputs.is-bot == 'true' }}
+      - name: Skip Linear check for bots
+        if: ${{ github.event.pull_request.user.type == 'Bot' ||
+                contains(fromJson(inputs.bot-accounts-json), github.actor) }}
         run: echo "PR opened by ${{ github.actor }} – Linear check skipped."
 
       - name: Ensure PR links a Linear issue
-        if: ${{ steps.gate.outputs.is-bot != 'true' }}
+        if: ${{ github.event.pull_request.user.type != 'Bot' &&
+                !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
         uses: copilotmoney/linear-pr-check@1.0.0
         with:
           prefix:       ${{ inputs.linear-prefix-regex }}
