@@ -1,0 +1,44 @@
+name: Validate & Tag Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver tag to create (e.g., v1.0.2)"
+        required: true
+        type: string
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
+      - name: yamllint
+        run: pipx run yamllint .
+
+  smoke-test-linear:
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Call require-linear from test harness
+        uses: odigos/ci-core/.github/workflows/require-linear.yml@${{ github.sha }}
+        with:
+          linear-prefix-regex: '(TEST-)'
+    # Secrets intentionally not inherited for smoke test; adjust as needed.
+
+  tag:
+    needs: [lint, smoke-test-linear]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create tag
+        run: |
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
