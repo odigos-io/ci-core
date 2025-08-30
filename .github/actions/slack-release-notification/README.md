@@ -7,7 +7,7 @@ This action sends Slack notifications based on job status for release updates. I
 ```yaml
 - name: Notify Slack Release Status
   if: always() # This is important to ensure the action runs always regardless of job status
-  uses: odigos-io/github-actions/.github/actions/slack-release-notification@main
+  uses: odigos-io/ci-core/.github/actions/slack-release-notification@main
   with:
     webhook-url: ${{ secrets.ODIGOS_RELEASE_STATUS_WEBHOOK_URL }}
     success-description: "This message will be shown in slack when the job is successful"
