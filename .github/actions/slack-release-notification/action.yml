@@ -21,29 +21,29 @@ runs:
     - name: Determine Job Status and Notify Slack
       shell: bash
       run: |
-        # Check if any previous step in the job failed
         if [ "${{ job.status }}" = "success" ]; then
           echo "Job succeeded, sending success notification"
           PAYLOAD='{
-            "description": "✅ ${{ inputs.success-description }}",
-            "tag": "${{ inputs.tag }}"
+            "description": "✅ '"${{ inputs.success-description }}"'",
+            "tag": "'"${{ inputs.tag }}"'"
           }'
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            ${{ inputs.webhook-url }}
+            "${{ inputs.webhook-url }}"
         else
           echo "Job failed or was cancelled, sending failure notification"
           REPO="${{ github.repository }}"
           RUN_ID="${{ github.run_id }}"
-          
-          PAYLOAD="{
-            \"link\": \"https://github.com/$REPO/actions/runs/$RUN_ID\",
-            \"description\": \"❌ ${{ inputs.failure-description }}\",
-            \"tag\": \"${{ inputs.tag }}\"
-          }"
+
+          PAYLOAD=$(jq -n \
+            --arg link "https://github.com/$REPO/actions/runs/$RUN_ID" \
+            --arg desc "❌ ${{ inputs.failure-description }}" \
+            --arg tag "${{ inputs.tag }}" \
+            '{link: $link, description: $desc, tag: $tag}')
+
           echo "Failure payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            ${{ inputs.webhook-url }}
+            "${{ inputs.webhook-url }}"
         fi
