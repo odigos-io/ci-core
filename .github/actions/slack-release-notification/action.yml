@@ -23,10 +23,10 @@ runs:
       run: |
         if [ "${{ job.status }}" = "success" ]; then
           echo "Job succeeded, sending success notification"
-          PAYLOAD='{
-            "description": "✅ '"${{ inputs.success-description }}"'",
-            "tag": "'"${{ inputs.tag }}"'"
-          }'
+          PAYLOAD=$(jq -n \
+            --arg desc "✅ ${{ inputs.success-description }}" \
+            --arg tag "${{ inputs.tag }}" \
+            '{description: $desc, tag: $tag}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
