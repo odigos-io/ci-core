@@ -23,6 +23,7 @@ runs:
       run: |
         REPO="${{ github.repository }}" # <owner>/<repository_name>
         REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
+        echo "Repository name: $REPOSITORY_NAME"
 
         if [ "${{ job.status }}" = "success" ]; then
           echo "Job succeeded, sending success notification"
