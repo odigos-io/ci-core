@@ -23,7 +23,6 @@ runs:
       run: |
         REPO="${{ github.repository }}" # <owner>/<repository_name>
         REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
-        echo "Repository name: $REPOSITORY_NAME"
 
         if [ "${{ job.status }}" = "success" ]; then
           echo "Job succeeded, sending success notification"
@@ -31,7 +30,7 @@ runs:
             --arg desc "✅ ${{ inputs.success-description }}" \
             --arg tag "${{ inputs.tag }}" \
             --arg repo_name "$REPOSITORY_NAME" \
-            '{description: $desc, tag: $tag}')
+            '{description: $desc, tag: $tag, repo_name: $repo_name}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
@@ -45,7 +44,7 @@ runs:
             --arg desc "❌ ${{ inputs.failure-description }}" \
             --arg tag "${{ inputs.tag }}" \
             --arg repo_name "$REPOSITORY_NAME" \
-            '{link: $link, description: $desc, tag: $tag}')
+            '{link: $link, description: $desc, tag: $tag, repo_name: $repo_name}')
 
           echo "Failure payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
