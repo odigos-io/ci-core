@@ -21,15 +21,15 @@ runs:
     - name: Determine Job Status and Notify Slack
       shell: bash
       run: |
-        REPO="${{ github.repository }}"
-        REPOSITORY_NAME=$(basename "$REPO")
-        
+        REPO="${{ github.repository }}" # <owner>/<repository_name>
+        REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
+
         if [ "${{ job.status }}" = "success" ]; then
           echo "Job succeeded, sending success notification"
           PAYLOAD=$(jq -n \
             --arg desc "✅ ${{ inputs.success-description }}" \
             --arg tag "${{ inputs.tag }}" \
-            --arg repo_name "$REPOSITORY_NAME"
+            --arg repo_name "$REPOSITORY_NAME" \
             '{description: $desc, tag: $tag}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
@@ -43,7 +43,7 @@ runs:
             --arg link "https://github.com/$REPO/actions/runs/$RUN_ID" \
             --arg desc "❌ ${{ inputs.failure-description }}" \
             --arg tag "${{ inputs.tag }}" \
-            --arg repo_name "$REPOSITORY_NAME"
+            --arg repo_name "$REPOSITORY_NAME" \
             '{link: $link, description: $desc, tag: $tag}')
 
           echo "Failure payload: $PAYLOAD"
