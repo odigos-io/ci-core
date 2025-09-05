@@ -23,6 +23,7 @@ This action sends Slack notifications based on job status for release updates. I
 | `success-description` | Description message for successful releases | Yes | "Release completed successfully" |
 | `failure-description` | Description message for failed releases | Yes | "Release failed" |
 | `tag` | Release tag | No | - |
+| `release-pr-link` | Release PR link | No | - |
 
 ## Slack Message Format
 

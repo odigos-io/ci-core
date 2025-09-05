@@ -14,6 +14,9 @@ inputs:
   tag:
     description: 'Release tag'
     required: false
+  release-pr-link:
+    description: 'If this update includes a release PR, this is the link to it'
+    required: false
 
 runs:
   using: 'composite'
@@ -21,26 +24,31 @@ runs:
     - name: Determine Job Status and Notify Slack
       shell: bash
       run: |
+        REPO="${{ github.repository }}" # <owner>/<repository_name>
+        REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
+
         if [ "${{ job.status }}" = "success" ]; then
-          echo "Job succeeded, sending success notification"
+          echo "Release notification SUCCESS"
           PAYLOAD=$(jq -n \
             --arg desc "✅ ${{ inputs.success-description }}" \
             --arg tag "${{ inputs.tag }}" \
-            '{description: $desc, tag: $tag}')
+            --arg repo_name "$REPOSITORY_NAME" \
+            --arg release_pr_link "${{ inputs.release-pr-link }}" \
+            '{description: $desc, tag: $tag, repo_name: $repo_name, release_pr_link: $release_pr_link}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
             "${{ inputs.webhook-url }}"
         else
-          echo "Job failed or was cancelled, sending failure notification"
-          REPO="${{ github.repository }}"
+          echo "Release notification FAILURE (ci workflow failed or cancelled)"
           RUN_ID="${{ github.run_id }}"
 
           PAYLOAD=$(jq -n \
             --arg link "https://github.com/$REPO/actions/runs/$RUN_ID" \
             --arg desc "❌ ${{ inputs.failure-description }}" \
             --arg tag "${{ inputs.tag }}" \
-            '{link: $link, description: $desc, tag: $tag}')
+            --arg repo_name "$REPOSITORY_NAME" \
+            '{link: $link, description: $desc, tag: $tag, repo_name: $repo_name}')
 
           echo "Failure payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
