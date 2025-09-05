@@ -19,7 +19,7 @@ This action sends Slack notifications based on job status for release updates. I
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `webhook-url` | Slack webhook URL (pulled from odigos secrets in ci) | No | - |
+| `webhook-url` | Slack webhook URL (pulled from odigos secrets in ci) | Yes | - |
 | `success-description` | Description message for successful releases | Yes | "Release completed successfully" |
 | `failure-description` | Description message for failed releases | Yes | "Release failed" |
 | `tag` | Release tag | No | - |
