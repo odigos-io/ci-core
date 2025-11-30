@@ -10,7 +10,7 @@ on:
       linear-prefix-regex:
         description: "Regex matching allowed Linear team prefixes (include trailing dash each)"
         required: false
-        default: '(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-)'
+        default: '(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)'
         type: string
       bot-accounts-json:
         description: "JSON array of GitHub usernames to skip check for"
@@ -38,7 +38,7 @@ jobs:
       - name: Ensure PR links a Linear issue
         if: ${{ github.event.pull_request.user.type != 'Bot' &&
                 !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
-        uses: copilotmoney/linear-pr-check@1.0.0
+        uses: copilotmoney/linear-pr-check@de6d3f5b53dccbb18f782506fbdb8fba0456bce5
         with:
           prefix:       ${{ inputs.linear-prefix-regex }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
