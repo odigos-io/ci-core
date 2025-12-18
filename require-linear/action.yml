@@ -1,0 +1,27 @@
+name: Require Linked Linear Issue
+description: Ensures pull requests have a linked Linear issue before merging
+
+inputs:
+  linear-prefix-regex:
+    description: "Regex matching allowed Linear team prefixes (include trailing dash each)"
+    required: false
+    default: "(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)"
+  bot-accounts-json:
+    description: "JSON array of GitHub usernames to skip check for"
+    required: false
+    default: '["dependabot[bot]","renovate[bot]","odigos-bot","github-actions[bot]","keyval-release-bot"]'
+
+runs:
+  using: composite
+  steps:
+    - name: Skip Linear check for bots
+      shell: bash
+      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.actor) }}
+      run: echo "PR opened by ${{ github.actor }} - Linear check skipped."
+
+    - name: Ensure PR links a Linear issue
+      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
+      uses: copilotmoney/linear-pr-check@de6d3f5b53dccbb18f782506fbdb8fba0456bce5
+      with:
+        prefix: ${{ inputs.linear-prefix-regex }}
+        github_token: ${{ github.token }}

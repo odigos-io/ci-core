@@ -10,7 +10,7 @@
 1. [Github STS (GitHub Secure Token Service)](#./sts/README.md)
 
 ### Ticket and Issue Management
-1. [require-linear](#./.github/workflows/require-linear.yml)
+1. [require-linear](#./require-linear/README.md)
 
 ### Release and Deployment Notifications
-1. [slack-release-notification](#./.github/actions/slack-release-notification/README.md)
+1. [slack-release-notification](./.github/actions/slack-release-notification/README.md)
