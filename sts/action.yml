@@ -1,0 +1,59 @@
+# Before using this action, ensure that you have set up the necessary
+# permissions and configurations as per the octo-sts/action documentation.
+
+name: "A wrapper for octo-sts/action to fetch STS token for odigos-io repos"
+description: "Get STS token for accessing odigos-io private repositories"
+
+inputs:
+  scope:
+    description: "GitHub repo scope for the STS token (e.g., odigos-io/ebpf-core)"
+    required: true
+  identity:
+    description: "Identity to request from STS"
+    required: true
+  output-git-config:
+    description: "If true, configures git to use the STS token for authentication"
+    required: false
+    default: "true"
+
+outputs:
+  GIT_CONFIG_PATH:
+    description: "Path to the git config file that uses the STS token for authentication"
+    value: ${{ steps.configure-git.outputs.GIT_CONFIG_PATH }}
+  GH_TOKEN:
+    description: "The STS token for accessing the specified repo scope"
+    value: ${{ steps.sts.outputs.token }}
+
+runs:
+  # Composite implies that the below steps will be run in the same runner as the calling workflow and not in a separate container
+  using: composite
+  steps:
+    - uses: octo-sts/action@d6c70ad3b9ac85df6da6b9749014d7283987cfec # v1.0.3
+      name: Get STS Token
+      id: sts
+      with:
+        scope: ${{ inputs.scope }}
+        identity: ${{ inputs.identity }}
+    - name: STS token permission check
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.sts.outputs.token }}
+      run: |
+        echo "[ + ] Got STS token! verifying permissions..."
+        gh repo list
+        echo "[ + ] Permission check completed"
+    - name: Configure git to use STS token
+      shell: bash
+      id: configure-git
+      if: ${{ inputs.output-git-config == 'true' }}
+      env:
+        GITHUB_TOKEN: ${{ steps.sts.outputs.token }}
+      run: |
+        GIT_CONFIG_FILE="/tmp/odigos.gitconfig"
+        echo "[ + ] Configuring git to use STS token for private repo access"
+        git config --file=$GIT_CONFIG_FILE --add url."https://x:${GITHUB_TOKEN}@github.com/${{ inputs.scope }}".insteadOf "https://github.com/${{ inputs.scope }}"
+        # Tell git to use this config file globally
+        git config --global include.path /tmp/odigos.gitconfig
+        echo "[ + ] Git configured to use STS token for private repo access"
+        echo "[ + ] Path to git config file: $GIT_CONFIG_FILE"
+        echo "GIT_CONFIG_PATH=$GIT_CONFIG_FILE" >> $GITHUB_OUTPUT
