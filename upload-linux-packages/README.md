@@ -5,7 +5,7 @@ This composite action sets up GCP authentication and uploads deb and rpm package
 ## Usage
 
 ```yaml
-- uses: odigos-io/ci-core/.github/actions/upload-linux-packages@main
+- uses: odigos-io/ci-core/upload-linux-packages@main
   with:
     gcp-project-id: ${{ secrets.GCP_PROJECT_ID }}
     gcp-workload-identity-provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -39,7 +39,7 @@ jobs:
 
       # Build your packages here...
 
-      - uses: odigos-io/ci-core/.github/actions/upload-linux-packages@main
+      - uses: odigos-io/ci-core/upload-linux-packages@main
         with:
           gcp-project-id: ${{ secrets.GCP_PROJECT_ID }}
           gcp-workload-identity-provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
