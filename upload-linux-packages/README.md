@@ -20,9 +20,8 @@ This composite action sets up GCP authentication and uploads deb and rpm package
 | `gcp-project-id` | GCP Project ID | Yes | - |
 | `gcp-workload-identity-provider` | GCP Workload Identity Provider | Yes | - |
 | `gcp-service-account` | GCP Service Account | Yes | - |
-| `package-directory` | Directory containing deb/rpm packages | No | `dist` |
-| `repository` | Base name of the repository (appends `-apt` for deb and `-rpm` for rpm) | No | `odigos` |
-| `location` | GCP location for Artifact Registry | No | `us-central1` |
+| `package-directory` | Directory containing deb/rpm packages | Yes | - |
+| `repository` | Base name of the repository (appends `-apt` for deb and `-rpm` for rpm) | Yes | - |
 | `access-token-lifetime` | Access token lifetime for GCP auth | No | `1200s` |
 
 ## Example
