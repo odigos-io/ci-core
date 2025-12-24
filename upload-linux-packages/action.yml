@@ -13,16 +13,10 @@ inputs:
     required: true
   package-directory:
     description: "Directory containing the deb and rpm packages (e.g., 'dist' or 'collector/dist')"
-    required: false
-    default: "dist"
+    required: true
   repository:
     description: "Base name of the repository in Artifact Registry (will append -apt for deb and -rpm for rpm)"
-    required: false
-    default: "odigos"
-  location:
-    description: "GCP location for Artifact Registry"
-    required: false
-    default: "us-central1"
+    required: true
   access-token-lifetime:
     description: "Access token lifetime for GCP authentication"
     required: false
@@ -52,7 +46,7 @@ runs:
           if [ -f "$deb" ]; then
             echo "Uploading $deb to Artifact Registry..."
             gcloud artifacts apt upload ${{ inputs.repository }}-apt \
-              --location=${{ inputs.location }} \
+              --location=us-central1 \
               --source="$deb"
           fi
         done
@@ -64,7 +58,7 @@ runs:
           if [ -f "$rpm" ]; then
             echo "Uploading $rpm to Artifact Registry..."
             gcloud artifacts yum upload ${{ inputs.repository }}-rpm \
-              --location=${{ inputs.location }} \
+              --location=us-central1 \
               --source="$rpm"
           fi
         done
