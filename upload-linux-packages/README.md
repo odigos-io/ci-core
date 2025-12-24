@@ -44,5 +44,6 @@ jobs:
           gcp-workload-identity-provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           gcp-service-account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           package-directory: 'collector/dist'
+          repository: 'odigos' # Use odigos for releae channel and staging for PR and internal versions
 ```
 
