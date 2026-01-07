@@ -16,7 +16,7 @@ inputs:
     description: "Agent type: 'vmagent' or 'otelcol'"
     required: true
   version:
-    description: "Version of the release (e.g., '0.1.56')"
+    description: "Version of the release (e.g., '0.1.56' or 'v0.1.56')"
     required: true
   package-directory:
     description: "Directory containing the deb and rpm packages (e.g., 'dist' or 'collector/dist')"
@@ -34,7 +34,12 @@ runs:
     - name: Upload deb packages to S3
       shell: bash
       run: |
-        S3_BASE_PATH="s3://${{ inputs.bucket-name }}/odigos-${{ inputs.agent-type }}/${{ inputs.version }}/apt"
+        VERSION="${{ inputs.version }}"
+        # Ensure version starts with 'v'
+        if [[ ! "$VERSION" =~ ^v ]]; then
+          VERSION="v$VERSION"
+        fi
+        S3_BASE_PATH="s3://${{ inputs.bucket-name }}/odigos-${{ inputs.agent-type }}/$VERSION/apt"
 
         for deb in ${{ inputs.package-directory }}/*.deb; do
           if [ -f "$deb" ]; then
@@ -47,7 +52,12 @@ runs:
     - name: Upload rpm packages to S3
       shell: bash
       run: |
-        S3_BASE_PATH="s3://${{ inputs.bucket-name }}/odigos-${{ inputs.agent-type }}/${{ inputs.version }}/rpm"
+        VERSION="${{ inputs.version }}"
+        # Ensure version starts with 'v'
+        if [[ ! "$VERSION" =~ ^v ]]; then
+          VERSION="v$VERSION"
+        fi
+        S3_BASE_PATH="s3://${{ inputs.bucket-name }}/odigos-${{ inputs.agent-type }}/$VERSION/rpm"
 
         for rpm in ${{ inputs.package-directory }}/*.rpm; do
           if [ -f "$rpm" ]; then

@@ -5,7 +5,7 @@ This GitHub Action uploads Linux packages (deb and rpm) to AWS S3 using OIDC aut
 ## Features
 
 - OIDC-based authentication with AWS (no long-lived credentials needed)
-- Organized upload structure: `odigos-{agent-type}/{version}/{apt|rpm}/`
+- Organized upload structure: `odigos-{agent-type}/v{version}/{apt|rpm}/` (version is automatically prefixed with 'v')
 - Supports both vmagent and otelcol agent types
 - Handles multiple architectures (amd64/x86_64 and arm64/aarch64)
 
@@ -17,7 +17,7 @@ This GitHub Action uploads Linux packages (deb and rpm) to AWS S3 using OIDC aut
 | `aws-region` | AWS Region | No | `us-east-1` |
 | `bucket-name` | S3 Bucket Name | Yes | - |
 | `agent-type` | Agent type: `vmagent` or `otelcol` | Yes | - |
-| `version` | Version of the release (e.g., `0.1.56`) | Yes | - |
+| `version` | Version of the release (e.g., `0.1.56` or `v0.1.56` - will be prefixed with 'v' if not present) | Yes | - |
 | `package-directory` | Directory containing the deb and rpm packages | Yes | - |
 
 ## Usage
@@ -40,7 +40,7 @@ The action organizes uploaded files in the following structure:
 ```
 s3://bucket-name/
   └── odigos-{agent-type}/
-      └── {version}/
+      └── v{version}/
           ├── apt/
           │   ├── {package}_amd64.deb
           │   └── {package}_arm64.deb
