@@ -65,7 +65,7 @@ runs:
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
           # Fail the pipeline
-          return 1
+          exit 1
         else
           echo "✅ No vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
         fi
