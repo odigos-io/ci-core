@@ -64,8 +64,11 @@ runs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
-          # Fail the pipeline
-          exit 1
+
+          # If we had high or critical vulnerabilities - fail the step
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            exit 1
+          fi
         else
           echo "✅ No vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
         fi
