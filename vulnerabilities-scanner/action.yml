@@ -1,0 +1,69 @@
+name: "A wrapper for Grype to scan for vulnerabilities in container images"
+description: "Scan container images for vulnerabilities using Grype"
+
+inputs:
+  image:
+    description: "The container image to scan, use complete image reference (e.g., 'nginx:latest' or 'myregistry.com/myimage:tag')"
+    required: true
+
+runs:
+  # Composite implies that the below steps will be run in the same runner as the calling workflow and not in a separate container
+  using: composite
+  steps:
+    - uses: anchore/scan-action@8d2fce09422cd6037e577f4130e9b925e9a37175
+      id: scan
+      continue-on-error: true
+      with:
+        image: ${{ inputs.image }}
+        output-format: "json"
+        fail-build: true
+        severity-cutoff: "high"
+        only-fixed: true
+
+    - name: Display in Summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## 🔍 Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        JSON_FILE="${{ steps.scan.outputs.json }}"
+        if [ -f "$JSON_FILE" ]; then
+          TOTAL=$(jq '.matches | length' "$JSON_FILE")
+          CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' "$JSON_FILE")
+          HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' "$JSON_FILE")
+          MEDIUM=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' "$JSON_FILE")
+          
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Critical vulnerabilities
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "### 🔴 Critical Vulnerabilities ($CRITICAL)" >> $GITHUB_STEP_SUMMARY
+            jq -r '.matches[] | select(.vulnerability.severity == "Critical") | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions[0] // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # High vulnerabilities
+          if [ "$HIGH" -gt 0 ]; then
+            echo "### 🟠 High Vulnerabilities ($HIGH)" >> $GITHUB_STEP_SUMMARY
+            jq -r '.matches[] | select(.vulnerability.severity == "High") | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions[0] // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Medium vulnerabilities
+          if [ "$MEDIUM" -gt 0 ]; then
+            echo "<details><summary>🟡 Medium Vulnerabilities ($MEDIUM)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            jq -r '.matches[] | select(.vulnerability.severity == "Medium") | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions[0] // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "✅ No vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+        fi
