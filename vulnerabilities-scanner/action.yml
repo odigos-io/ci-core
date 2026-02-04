@@ -9,7 +9,7 @@ inputs:
     description: "Path to the file system to scan (e.g., a directory containing source code or extracted image layers)"
     required: false
   severity-cutoff:
-    description: "Comma-separated list of severity levels to include (e.g., 'HIGH,CRITICAL' or 'MEDIUM,HIGH,CRITICAL')"
+    description: "Comma-separated list of severity levels that will cause the workflow to fail (e.g., 'HIGH,CRITICAL' or 'CRITICAL'). Leave empty to never fail."
     required: false
     default: "HIGH,CRITICAL"
 
@@ -34,7 +34,7 @@ runs:
         format: 'json'
         output: 'trivy-results.json'
         ignore-unfixed: true
-        severity: ${{ inputs.severity-cutoff }}
+        severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
 
     - name: Scan Path for Vulnerabilities
       if: ${{ inputs.path != '' && inputs.image == '' }}
@@ -46,7 +46,7 @@ runs:
         format: 'json'
         output: 'trivy-results.json'
         ignore-unfixed: true
-        severity: ${{ inputs.severity-cutoff }}
+        severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
 
     - name: Display in Summary
       if: always()
@@ -57,17 +57,21 @@ runs:
 
         JSON_FILE="trivy-results.json"
         if [ -f "$JSON_FILE" ]; then
+          SEVERITY_CUTOFF="${{ inputs.severity-cutoff }}"
+          
           # Trivy JSON format has Results array with Vulnerabilities inside each result
           TOTAL=$(jq '[.Results[]?.Vulnerabilities // [] | .[]] | length' "$JSON_FILE")
           CRITICAL=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "CRITICAL")] | length' "$JSON_FILE")
           HIGH=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH")] | length' "$JSON_FILE")
           MEDIUM=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "MEDIUM")] | length' "$JSON_FILE")
+          LOW=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "LOW")] | length' "$JSON_FILE")
           
           echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
           echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
           echo "| 🟡 Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔵 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
@@ -94,9 +98,35 @@ runs:
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # If we had high or critical vulnerabilities - fail the step
-          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-            exit 1
+          # Low vulnerabilities
+          if [ "$LOW" -gt 0 ]; then
+            echo "<details><summary>🔵 Low Vulnerabilities ($LOW)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "LOW")] | .[] | "- **\(.VulnerabilityID)** in `\(.PkgName)@\(.InstalledVersion)` (Fixed: \(.FixedVersion // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Fail the step if vulnerabilities matching the severity cutoff were found
+          if [ -n "$SEVERITY_CUTOFF" ]; then
+            SHOULD_FAIL=false
+            
+            if [[ "$SEVERITY_CUTOFF" == *"CRITICAL"* ]] && [ "$CRITICAL" -gt 0 ]; then
+              SHOULD_FAIL=true
+            fi
+            if [[ "$SEVERITY_CUTOFF" == *"HIGH"* ]] && [ "$HIGH" -gt 0 ]; then
+              SHOULD_FAIL=true
+            fi
+            if [[ "$SEVERITY_CUTOFF" == *"MEDIUM"* ]] && [ "$MEDIUM" -gt 0 ]; then
+              SHOULD_FAIL=true
+            fi
+            if [[ "$SEVERITY_CUTOFF" == *"LOW"* ]] && [ "$LOW" -gt 0 ]; then
+              SHOULD_FAIL=true
+            fi
+            
+            if [ "$SHOULD_FAIL" = true ]; then
+              exit 1
+            fi
           fi
         else
           echo "✅ No vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
