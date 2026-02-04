@@ -22,6 +22,11 @@ A GitHub Actions composite action that scans container images or filesystem path
 
 \* You must provide either `image` or `path`, but not both.
 
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `results-json` | The raw Trivy scan results in JSON format |
 
 ### Scan a container image
 ```yaml
@@ -63,6 +68,22 @@ steps:
       image: myregistry.com/myimage:tag
       severity-cutoff: ""
 ```
+
+### Use scan results in subsequent steps
+```yaml
+steps:
+  - name: Scan image for vulnerabilities
+    id: scan
+    uses: odigos-io/ci-core/vulnerabilities-scanner@main
+    with:
+      image: nginx:latest
+      severity-cutoff: ""
+
+  - name: Process scan results
+    run: |
+      echo '${{ steps.scan.outputs.results-json }}' | jq '.Results[].Vulnerabilities | length'
+```
+
 ## Behavior
 
 - **Scanning**: Always scans for all severity levels and displays all vulnerabilities found
