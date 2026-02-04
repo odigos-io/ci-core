@@ -13,6 +13,11 @@ inputs:
     required: false
     default: "HIGH,CRITICAL"
 
+outputs:
+  results-json:
+    description: "The raw Trivy scan results in JSON format"
+    value: ${{ steps.process-results.outputs.results-json }}
+
 runs:
   # Composite implies that the below steps will be run in the same runner as the calling workflow and not in a separate container
   using: composite
@@ -50,6 +55,7 @@ runs:
 
     - name: Display in Summary
       if: always()
+      id: process-results
       shell: bash
       run: |
         echo "## 🔍 Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
@@ -65,6 +71,9 @@ runs:
           HIGH=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH")] | length' "$JSON_FILE")
           MEDIUM=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "MEDIUM")] | length' "$JSON_FILE")
           LOW=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "LOW")] | length' "$JSON_FILE")
+          
+          # Set output for trivy results
+          echo "results-json=$(cat $JSON_FILE | jq -c .)" >> $GITHUB_OUTPUT
           
           echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
