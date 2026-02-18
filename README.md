@@ -11,6 +11,7 @@
 
 ### Ticket and Issue Management
 1. [require-linear](./require-linear/README.md)
+1. [require-release-note](./require-release-note/README.md)
 
 ### Security and Vulnerability Scanning
 1. [vulnerabilities-scanner](./vulnerabilities-scanner/README.md)
