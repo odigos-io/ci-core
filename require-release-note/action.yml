@@ -1,0 +1,43 @@
+name: Require Release Note
+description: Ensures pull requests have a release note before merging
+
+inputs:
+  bot-accounts-json:
+    description: "JSON array of GitHub usernames to skip check for"
+    required: false
+    default: '["dependabot[bot]","renovate[bot]","odigos-bot","github-actions[bot]","keyval-release-bot"]'
+
+runs:
+  using: composite
+  steps:
+    - name: Skip release note check for bots
+      shell: bash
+      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.actor) }}
+      run: echo "PR opened by ${{ github.actor }} - release note check skipped."
+
+    - name: Check release note block
+      shell: bash
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        echo "$PR_BODY" > pr_body.txt
+        
+        if ! grep -q '^```release-note' pr_body.txt; then
+          echo "❌ Missing \`\`\`release-note block"
+          exit 1
+        fi
+
+        # Extract content between fenced blocks
+        CONTENT=$(awk '
+          /^```release-note/ {flag=1; next}
+          /^```/ {flag=0}
+          flag {print}
+        ' pr_body.txt)
+
+        # Block must contain at least one non-whitespace character
+        if ! echo "$CONTENT" | grep -q '[^[:space:]]'; then
+          echo "❌ release-note block is empty"
+          exit 1
+        fi
+
+        echo "✅ Release note present"
