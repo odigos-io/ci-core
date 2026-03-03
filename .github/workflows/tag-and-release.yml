@@ -135,9 +135,11 @@ jobs:
                 # Pre/rc exists; its stable base already released — increment it
                 _B="${BASE_VER#v}"
                 NEW="${BASE_VER%.*}.$(($(echo "$_B" | cut -d. -f3)+1))"
+                CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
               else
                 # Pre/rc exists; stable base not yet released — promote to stable
                 NEW="$BASE_VER"
+                CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
               fi
               ;;
             pre)
