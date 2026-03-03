@@ -120,26 +120,30 @@ jobs:
               NEW="v${MAJOR}.$((MINOR+1)).0"
               ;;
             patch)
-              # Also scan pre-release tags: on a release branch where no stable
-              # release exists yet (e.g. releases/1.1.x with v1.1.0-pre.N or
-              # v1.1.0-rc.N but no v1.1.0), the first stable should be the
-              # pre-release base version, not an increment of the prior line.
-              LATEST_ANY=$(git tag --merged HEAD --list 'v[0-9]*' \
-                | sort -V | tail -1)
-              LATEST_ANY=${LATEST_ANY:-v0.0.0}
-              BASE_VER="${LATEST_ANY%%-*}"  # strip -pre.N / -rc.N suffix
-              if [[ "$LATEST_ANY" == "$BASE_VER" ]]; then
-                # Latest tag is already stable — normal patch increment
-                NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
-              elif git tag --merged HEAD --list 'v[0-9]*' | grep -qxF "$BASE_VER"; then
-                # Pre/rc exists; its stable base already released — increment it
-                _B="${BASE_VER#v}"
-                NEW="${BASE_VER%.*}.$(($(echo "$_B" | cut -d. -f3)+1))"
-                CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
+              # On a release branch (releases/X.Y.x), scan pre-release tags too:
+              # if no stable exists yet (e.g. only v1.1.0-pre.N), promote to stable.
+              # On any other branch (main), pre-release tags that happen to be
+              # reachable are from a sibling release line and must be ignored.
+              if [[ "${{ inputs.base_branch }}" == releases/* ]]; then
+                LATEST_ANY=$(git tag --merged HEAD --list 'v[0-9]*' \
+                  | sort -V | tail -1)
+                LATEST_ANY=${LATEST_ANY:-v0.0.0}
+                BASE_VER="${LATEST_ANY%%-*}"  # strip -pre.N / -rc.N suffix
+                if [[ "$LATEST_ANY" == "$BASE_VER" ]]; then
+                  # Latest tag is already stable — normal patch increment
+                  NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
+                elif git tag --merged HEAD --list 'v[0-9]*' | grep -qxF "$BASE_VER"; then
+                  # Pre/rc exists; its stable base already released — increment it
+                  _B="${BASE_VER#v}"
+                  NEW="${BASE_VER%.*}.$(($(echo "$_B" | cut -d. -f3)+1))"
+                  CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
+                else
+                  # Pre/rc exists; stable base not yet released — promote to stable
+                  NEW="$BASE_VER"
+                  CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
+                fi
               else
-                # Pre/rc exists; stable base not yet released — promote to stable
-                NEW="$BASE_VER"
-                CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
+                NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
               fi
               ;;
             pre)
