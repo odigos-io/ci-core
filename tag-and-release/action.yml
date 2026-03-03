@@ -20,7 +20,7 @@ inputs:
 
   # ── calculate inputs ────────────────────────────────────────────────────────
   bump:
-    description: "Bump type: patch | minor | major | pre | pre-major | rc | rc-major"
+    description: "Bump type: patch | minor | major | pre-minor | pre-major | rc-minor | rc-major"
     required: false
   base_branch:
     description: "The branch being tagged (e.g. main or releases/1.3.x)"
