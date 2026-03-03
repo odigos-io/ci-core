@@ -10,6 +10,8 @@ run-name: "Tag and Release · ${{ inputs.bump }} on ${{ inputs.base_branch }}"
 #   major  v1.2.3        → v2.0.0
 #   minor  v1.2.3        → v1.3.0
 #   patch  v1.2.3        → v1.2.4
+#   patch  v1.3.0-pre.N  → v1.3.0   (first stable; promotes pre/rc to stable)
+#   patch  v1.3.0-rc.N   → v1.3.0   (first stable; promotes pre/rc to stable)
 #
 #   (no tags)            → treated as v0.0.0 baseline for all bump types
 #
@@ -84,8 +86,10 @@ jobs:
           BUMP="${{ inputs.bump }}"
 
           # Find latest tag reachable from the base branch.
-          # For pre/rc bumps include pre-release tags; otherwise stable only.
-          if [[ "$BUMP" == "pre" || "$BUMP" == "rc" ]]; then
+          # pre/rc/pre-major/rc-major include pre-release tags so that
+          # PRE_TYPE/PRE_NUM are correctly detected for guard checks.
+          # patch/minor/major use stable-only so arithmetic stays clean.
+          if [[ "$BUMP" == pre* || "$BUMP" == rc* ]]; then
             CURRENT=$(git tag --merged HEAD --list 'v[0-9]*' \
               | sort -V | tail -1)
           else
@@ -116,7 +120,25 @@ jobs:
               NEW="v${MAJOR}.$((MINOR+1)).0"
               ;;
             patch)
-              NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
+              # Also scan pre-release tags: on a release branch where no stable
+              # release exists yet (e.g. releases/1.1.x with v1.1.0-pre.N or
+              # v1.1.0-rc.N but no v1.1.0), the first stable should be the
+              # pre-release base version, not an increment of the prior line.
+              LATEST_ANY=$(git tag --merged HEAD --list 'v[0-9]*' \
+                | sort -V | tail -1)
+              LATEST_ANY=${LATEST_ANY:-v0.0.0}
+              BASE_VER="${LATEST_ANY%%-*}"  # strip -pre.N / -rc.N suffix
+              if [[ "$LATEST_ANY" == "$BASE_VER" ]]; then
+                # Latest tag is already stable — normal patch increment
+                NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
+              elif git tag --merged HEAD --list 'v[0-9]*' | grep -qxF "$BASE_VER"; then
+                # Pre/rc exists; its stable base already released — increment it
+                _B="${BASE_VER#v}"
+                NEW="${BASE_VER%.*}.$(($(echo "$_B" | cut -d. -f3)+1))"
+              else
+                # Pre/rc exists; stable base not yet released — promote to stable
+                NEW="$BASE_VER"
+              fi
               ;;
             pre)
               if [[ "$PRE_TYPE" == "rc" ]]; then
