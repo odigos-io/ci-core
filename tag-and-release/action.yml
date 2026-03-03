@@ -1,0 +1,202 @@
+name: "Tag and Release"
+description: |
+  Two-phase composite action for semantic version tagging and GitHub release creation.
+
+  Phase 1 — operation: calculate
+    Computes the next version from git tag history and writes the release preview
+    to the GitHub Actions job summary. The repo must already be checked out with
+    full history and tags (fetch-depth: 0, fetch-tags: true).
+
+  Phase 2 — operation: tag
+    Creates the annotated git tag, pushes it, creates the GitHub release, and
+    (when required) creates the release branch. The repo must be checked out with
+    persist-credentials: false so that STS handles authentication. The calling job
+    must have id-token: write permission for the STS OIDC exchange.
+
+inputs:
+  operation:
+    description: "'calculate' to compute the next version; 'tag' to create the tag/release/branch"
+    required: true
+
+  # ── calculate inputs ────────────────────────────────────────────────────────
+  bump:
+    description: "Bump type: patch | minor | major | pre | pre-major | rc | rc-major"
+    required: false
+  base_branch:
+    description: "The branch being tagged (e.g. main or releases/1.3.x)"
+    required: false
+
+  # ── tag inputs ──────────────────────────────────────────────────────────────
+  new_version:
+    description: "The version string to tag (e.g. v1.3.0). Output of the calculate phase."
+    required: false
+  create_branch:
+    description: "'true' if a new release branch should be created"
+    required: false
+    default: "false"
+  release_branch:
+    description: "Release branch name, e.g. releases/1.3.x"
+    required: false
+    default: ""
+  actor:
+    description: "GitHub actor (github.actor) — recorded in the tag message"
+    required: false
+  run_url:
+    description: "URL of the triggering Actions run — recorded in the tag message"
+    required: false
+  sts_scope:
+    description: "GitHub repo scope for the STS token"
+    required: false
+    default: ""
+  sts_identity:
+    description: "STS identity to request"
+    required: false
+    default: ""
+
+outputs:
+  current_version:
+    description: "Most recent version tag reachable from HEAD (calculate phase)"
+    value: ${{ steps.calc.outputs.current_version }}
+  new_version:
+    description: "The newly calculated version (calculate phase)"
+    value: ${{ steps.calc.outputs.new_version }}
+  create_branch:
+    description: "'true' if a new release branch should be created (calculate phase)"
+    value: ${{ steps.calc.outputs.create_branch }}
+  release_branch:
+    description: "Release branch name (calculate phase)"
+    value: ${{ steps.calc.outputs.release_branch }}
+
+runs:
+  using: composite
+  steps:
+
+    # ── CALCULATE PHASE ────────────────────────────────────────────────────────
+
+    - name: Calculate new version
+      id: calc
+      if: ${{ inputs.operation == 'calculate' }}
+      shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+      run: node "${{ github.action_path }}/calculate.js"
+
+    - name: Write release preview summary
+      if: ${{ inputs.operation == 'calculate' }}
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        BUMP: ${{ inputs.bump }}
+        CURRENT_VERSION: ${{ steps.calc.outputs.current_version }}
+        NEW_VERSION: ${{ steps.calc.outputs.new_version }}
+        CREATE_BRANCH: ${{ steps.calc.outputs.create_branch }}
+        RELEASE_BRANCH: ${{ steps.calc.outputs.release_branch }}
+      run: |
+        {
+          echo "### Release Preview"
+          echo ""
+          echo "| Field | Value |"
+          echo "|---|---|"
+          echo "| Base branch | \`${BASE_BRANCH}\` |"
+          echo "| Bump type | \`${BUMP}\` |"
+          echo "| Current version | \`${CURRENT_VERSION}\` |"
+          echo "| **New version** | \`${NEW_VERSION}\` |"
+          if [[ "${CREATE_BRANCH}" == "true" ]]; then
+            echo "| Release branch | \`${RELEASE_BRANCH}\` *(will be created)* |"
+          fi
+          echo ""
+          echo "> Approve the **release-gate** environment below to proceed."
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # ── TAG PHASE ──────────────────────────────────────────────────────────────
+
+    - name: Get STS token
+      id: sts
+      if: ${{ inputs.operation == 'tag' }}
+      uses: odigos-io/ci-core/sts@main
+      with:
+        scope: ${{ inputs.sts_scope }}
+        identity: ${{ inputs.sts_identity }}
+
+    - name: Configure git identity
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      run: |
+        git config user.name  "ci-core[bot]"
+        git config user.email "ci-core-bot@odigos.io"
+
+    - name: Fail if tag already exists
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.new_version }}
+      run: |
+        if git rev-parse "${NEW_VERSION}" >/dev/null 2>&1; then
+          echo "::error::Tag ${NEW_VERSION} already exists"; exit 1
+        fi
+
+    - name: Create & push tag
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.new_version }}
+        BUMP: ${{ inputs.bump }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        ACTOR: ${{ inputs.actor }}
+        RUN_URL: ${{ inputs.run_url }}
+      run: |
+        git tag -a "${NEW_VERSION}" -m "$(printf \
+          'Release %s\n\nbump:    %s\nbranch:  %s\nactor:   %s\nrun:     %s' \
+          "${NEW_VERSION}" \
+          "${BUMP}" \
+          "${BASE_BRANCH}" \
+          "${ACTOR}" \
+          "${RUN_URL}")"
+        git push origin "${NEW_VERSION}"
+
+    - name: Create GitHub release
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN }}
+        NEW_VERSION: ${{ inputs.new_version }}
+      run: |
+        PRERELEASE_FLAG=""
+        if [[ "${NEW_VERSION}" == *"-pre."* || "${NEW_VERSION}" == *"-rc."* ]]; then
+          PRERELEASE_FLAG="--prerelease"
+        fi
+        gh release create "${NEW_VERSION}" \
+          --title "${NEW_VERSION}" \
+          --generate-notes \
+          $PRERELEASE_FLAG
+
+    - name: Create & push release branch
+      if: ${{ inputs.operation == 'tag' && inputs.create_branch == 'true' }}
+      shell: bash
+      env:
+        RELEASE_BRANCH: ${{ inputs.release_branch }}
+      run: |
+        if git ls-remote --exit-code --heads origin "${RELEASE_BRANCH}" >/dev/null 2>&1; then
+          echo "Branch ${RELEASE_BRANCH} already exists; skipping."
+        else
+          git checkout -b "${RELEASE_BRANCH}"
+          git push origin "${RELEASE_BRANCH}"
+        fi
+
+    - name: Write release complete summary
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.new_version }}
+        CREATE_BRANCH: ${{ inputs.create_branch }}
+        RELEASE_BRANCH: ${{ inputs.release_branch }}
+      run: |
+        {
+          echo "### Release Complete"
+          echo ""
+          echo "- Tag: \`${NEW_VERSION}\`"
+          if [[ "${CREATE_BRANCH}" == "true" ]]; then
+            echo "- Branch: \`${RELEASE_BRANCH}\`"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

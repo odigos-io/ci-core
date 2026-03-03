@@ -62,17 +62,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      current_version: ${{ steps.calc.outputs.current_version }}
       new_version: ${{ steps.calc.outputs.new_version }}
       create_branch: ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
     steps:
-      - name: Enforce dispatch from main
-        run: |
-          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "::error::This workflow must be dispatched from main (got ${{ github.ref }})."
-            exit 1
-          fi
 
       - uses: actions/checkout@v4
         with:
@@ -80,145 +73,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Calculate new version
-        id: calc
-        run: |
-          BUMP="${{ inputs.bump }}"
-
-          # Find latest tag reachable from the base branch.
-          # pre/rc/pre-major/rc-major include pre-release tags so that
-          # PRE_TYPE/PRE_NUM are correctly detected for guard checks.
-          # patch/minor/major use stable-only so arithmetic stays clean.
-          if [[ "$BUMP" == pre* || "$BUMP" == rc* ]]; then
-            CURRENT=$(git tag --merged HEAD --list 'v[0-9]*' \
-              | sort -V | tail -1)
-          else
-            CURRENT=$(git tag --merged HEAD --list 'v[0-9]*' \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sort -V | tail -1)
-          fi
-          CURRENT=${CURRENT:-v0.0.0}
-
-          # Parse components
-          VER=${CURRENT#v}
-          MAJOR=$(echo "$VER" | cut -d. -f1)
-          MINOR=$(echo "$VER" | cut -d. -f2)
-          PATCH_FULL=$(echo "$VER" | cut -d. -f3)
-          PATCH=$(echo "$PATCH_FULL" | cut -d- -f1)
-          PRE=$(echo "$PATCH_FULL" | cut -s -d- -f2-)
-          PRE_TYPE=$(echo "$PRE" | cut -d. -f1)
-          PRE_NUM=$(echo "$PRE" | cut -d. -f2)
-
-          CREATE_BRANCH="false"
-          BRANCH=""
-
-          case "$BUMP" in
-            major)
-              NEW="v$((MAJOR+1)).0.0"
-              ;;
-            minor)
-              NEW="v${MAJOR}.$((MINOR+1)).0"
-              ;;
-            patch)
-              # On a release branch (releases/X.Y.x), scan pre-release tags too:
-              # if no stable exists yet (e.g. only v1.1.0-pre.N), promote to stable.
-              # On any other branch (main), pre-release tags that happen to be
-              # reachable are from a sibling release line and must be ignored.
-              if [[ "${{ inputs.base_branch }}" == releases/* ]]; then
-                LATEST_ANY=$(git tag --merged HEAD --list 'v[0-9]*' \
-                  | sort -V | tail -1)
-                LATEST_ANY=${LATEST_ANY:-v0.0.0}
-                BASE_VER="${LATEST_ANY%%-*}"  # strip -pre.N / -rc.N suffix
-                if [[ "$LATEST_ANY" == "$BASE_VER" ]]; then
-                  # Latest tag is already stable — normal patch increment
-                  NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
-                elif git tag --merged HEAD --list 'v[0-9]*' | grep -qxF "$BASE_VER"; then
-                  # Pre/rc exists; its stable base already released — increment it
-                  _B="${BASE_VER#v}"
-                  NEW="${BASE_VER%.*}.$(($(echo "$_B" | cut -d. -f3)+1))"
-                  CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
-                else
-                  # Pre/rc exists; stable base not yet released — promote to stable
-                  NEW="$BASE_VER"
-                  CURRENT="$LATEST_ANY"  # display actual latest, not prior stable
-                fi
-              else
-                NEW="v${MAJOR}.${MINOR}.$((PATCH+1))"
-              fi
-              ;;
-            pre)
-              if [[ "$PRE_TYPE" == "rc" ]]; then
-                echo "::error::Invalid: 'pre' cannot follow an rc (${CURRENT})."
-                exit 1
-              elif [[ "$PRE_TYPE" == "pre" ]]; then
-                NEW="v${MAJOR}.${MINOR}.${PATCH}-pre.$((PRE_NUM+1))"
-              else
-                NEW="v${MAJOR}.$((MINOR+1)).0-pre.0"
-                CREATE_BRANCH="true"
-                BRANCH="releases/${MAJOR}.$((MINOR+1)).x"
-              fi
-              ;;
-            rc)
-              if [[ "$PRE_TYPE" == "rc" ]]; then
-                NEW="v${MAJOR}.${MINOR}.${PATCH}-rc.$((PRE_NUM+1))"
-                # branch already exists from when the rc series started
-              elif [[ "$PRE_TYPE" == "pre" ]]; then
-                NEW="v${MAJOR}.${MINOR}.${PATCH}-rc.0"
-                # branch already exists from when the pre series started
-              else
-                NEW="v${MAJOR}.$((MINOR+1)).0-rc.0"
-                CREATE_BRANCH="true"
-                _VER=${NEW#v}
-                BRANCH="releases/$(echo "$_VER" | cut -d. -f1).$(echo "$_VER" | cut -d. -f2).x"
-              fi
-              ;;
-            pre-major)
-              if [[ "$PRE_TYPE" == "rc" ]]; then
-                echo "::error::Invalid: 'pre-major' cannot follow an rc (${CURRENT})."
-                exit 1
-              elif [[ -n "$PRE_TYPE" ]]; then
-                echo "::error::Invalid: 'pre-major' cannot be used when already on a pre-release (${CURRENT}). Use 'pre' to continue the series."
-                exit 1
-              fi
-              NEW="v$((MAJOR+1)).0.0-pre.0"
-              CREATE_BRANCH="true"
-              BRANCH="releases/$((MAJOR+1)).0.x"
-              ;;
-            rc-major)
-              if [[ -n "$PRE_TYPE" ]]; then
-                echo "::error::Invalid: 'rc-major' cannot be used when already on a pre-release (${CURRENT}). Use 'rc' to continue the series."
-                exit 1
-              fi
-              NEW="v$((MAJOR+1)).0.0-rc.0"
-              CREATE_BRANCH="true"
-              BRANCH="releases/$((MAJOR+1)).0.x"
-              ;;
-          esac
-
-          echo "current_version=${CURRENT}" >> "$GITHUB_OUTPUT"
-          echo "new_version=${NEW}"         >> "$GITHUB_OUTPUT"
-          echo "create_branch=${CREATE_BRANCH}" >> "$GITHUB_OUTPUT"
-          echo "release_branch=${BRANCH}"   >> "$GITHUB_OUTPUT"
-
-      - name: Write release preview summary
-        run: |
-          {
-            echo "### Release Preview"
-            echo ""
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Base branch | \`${{ inputs.base_branch }}\` |"
-            echo "| Bump type | \`${{ inputs.bump }}\` |"
-            # yamllint disable-line rule:line-length
-            echo "| Current version | \`${{ steps.calc.outputs.current_version }}\` |"
-            echo "| **New version** | \`${{ steps.calc.outputs.new_version }}\` |"
-            if [[ "${{ steps.calc.outputs.create_branch }}" == "true" ]]; then
-              # yamllint disable-line rule:line-length
-              echo "| Release branch | \`${{ steps.calc.outputs.release_branch }}\` *(will be created)* |"
-            fi
-            echo ""
-            echo "> Approve the **release-gate** environment below to proceed."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - id: calc
+        uses: odigos-io/ci-core/tag-and-release@main
+        with:
+          operation: calculate
+          bump: ${{ inputs.bump }}
+          base_branch: ${{ inputs.base_branch }}
 
   # This job runs inside the "release-gate" environment.
   # Configure that environment with required reviewers so GitHub pauses
@@ -230,9 +90,7 @@ jobs:
     environment: release-gate
     steps:
       - name: Release approved
-        run: |
-          echo "Releasing ${{ needs.calculate.outputs.new_version }} \
-          from ${{ inputs.base_branch }}"
+        run: echo "Releasing ${{ needs.calculate.outputs.new_version }} from ${{ inputs.base_branch }}"
 
   tag:
     needs: [calculate, confirm]
@@ -240,10 +98,6 @@ jobs:
     permissions:
       id-token: write # required for STS OIDC token exchange
       contents: read
-    env:
-      NEW_VERSION: ${{ needs.calculate.outputs.new_version }}
-      CREATE_BRANCH: ${{ needs.calculate.outputs.create_branch }}
-      RELEASE_BRANCH: ${{ needs.calculate.outputs.release_branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -252,66 +106,15 @@ jobs:
           fetch-tags: true
           persist-credentials: false # STS handles auth
 
-      - name: Get STS token
-        id: sts
-        uses: odigos-io/ci-core/sts@main
+      - uses: odigos-io/ci-core/tag-and-release@main
         with:
-          scope: odigos-io/ci-core
-          identity: tag-releaser
-
-      - name: Configure git identity
-        run: |
-          git config user.name  "ci-core[bot]"
-          git config user.email "ci-core-bot@odigos.io"
-
-      - name: Fail if tag already exists
-        run: |
-          if git rev-parse "${NEW_VERSION}" >/dev/null 2>&1; then
-            echo "::error::Tag ${NEW_VERSION} already exists"; exit 1
-          fi
-
-      - name: Create & push tag
-        run: |
-          git tag -a "${NEW_VERSION}" -m "$(printf \
-            'Release %s\n\nbump:    %s\nbranch:  %s\nactor:   %s\nrun:     %s' \
-            "${NEW_VERSION}" \
-            "${{ inputs.bump }}" \
-            "${{ inputs.base_branch }}" \
-            "${{ github.actor }}" \
-            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")"
-          git push origin "${NEW_VERSION}"
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN }}
-        run: |
-          PRERELEASE_FLAG=""
-          if [[ "${NEW_VERSION}" == *"-pre."* || "${NEW_VERSION}" == *"-rc."* ]]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-          gh release create "${NEW_VERSION}" \
-            --title "${NEW_VERSION}" \
-            --generate-notes \
-            $PRERELEASE_FLAG
-
-      - name: Create & push release branch (patch / new rc)
-        if: env.CREATE_BRANCH == 'true'
-        run: |
-          if git ls-remote --exit-code --heads origin \
-            "${RELEASE_BRANCH}" >/dev/null 2>&1; then
-            echo "Branch ${RELEASE_BRANCH} already exists; skipping."
-          else
-            git checkout -b "${RELEASE_BRANCH}"
-            git push origin "${RELEASE_BRANCH}"
-          fi
-
-      - name: Write release complete summary
-        run: |
-          {
-            echo "### Release Complete"
-            echo ""
-            echo "- Tag: \`${NEW_VERSION}\`"
-            if [[ "${CREATE_BRANCH}" == "true" ]]; then
-              echo "- Branch: \`${RELEASE_BRANCH}\`"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          operation: tag
+          bump: ${{ inputs.bump }}
+          base_branch: ${{ inputs.base_branch }}
+          sts_scope: odigos-io/ci-core
+          sts_identity: tag-releaser
+          new_version: ${{ needs.calculate.outputs.new_version }}
+          create_branch: ${{ needs.calculate.outputs.create_branch }}
+          release_branch: ${{ needs.calculate.outputs.release_branch }}
+          actor: ${{ github.actor }}
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
