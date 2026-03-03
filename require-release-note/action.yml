@@ -17,6 +17,7 @@ runs:
 
     - name: Check release note block
       shell: bash
+      if: ${{ github.event.pull_request.user.type != 'Bot' || !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
