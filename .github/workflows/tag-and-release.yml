@@ -1,37 +1,8 @@
 name: Tag and Release
 run-name: "Tag and Release · ${{ inputs.bump }} on ${{ inputs.base_branch }}"
 
-# Manually triggered release workflow. Calculates the next version, pauses for
-# human approval via the "release-gate" environment, then creates an annotated
-# git tag and a GitHub release.
-#
-# Version bump logic (based on the latest tag reachable from base_branch):
-#
-#   major  v1.2.3        → v2.0.0   + creates releases/2.0.x branch
-#   minor  v1.2.3        → v1.3.0   + creates releases/1.3.x branch
-#   patch  v1.2.3        → v1.2.4
-#   patch  v1.3.0-pre.N  → v1.3.0   (first stable; promotes pre/rc to stable)
-#   patch  v1.3.0-rc.N   → v1.3.0   (first stable; promotes pre/rc to stable)
-#
-#   (no tags)            → treated as v0.0.0 baseline for all bump types
-#
-#   pre          v1.2.3        → v1.3.0-pre.0   + creates releases/1.3.x branch
-#   pre          v1.3.0-pre.0  → v1.3.0-pre.1
-#   pre          v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
-#
-#   pre-major    v1.2.3        → v2.0.0-pre.0   + creates releases/2.0.x branch
-#   pre-major    v1.2.3-pre.N  → ERROR (already on a pre-release; use 'pre')
-#   pre-major    v1.2.3-rc.N   → ERROR (cannot go back to pre after rc)
-#
-#   rc           v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
-#   rc           v1.3.0-pre.N  → v1.3.0-rc.0    (releases/1.3.x already exists)
-#   rc           v1.3.0-rc.N   → v1.3.0-rc.N+1  (releases/1.3.x already exists)
-#
-#   rc-major     v1.2.3        → v2.0.0-rc.0    + creates releases/2.0.x branch
-#   rc-major     v1.2.3-pre.N  → ERROR (already on a pre-release; use 'rc')
-#
-# A release branch (releases/X.Y.x) is created whenever a new rc/rc-major or a
-# first pre/pre-major is started. If the branch already exists the step is skipped.
+# Manually triggered release workflow.
+# Version bump logic is documented in tag-and-release/calculate.js.
 #
 # Requires a GitHub Environment named "release-gate" configured with
 # required reviewers to serve as the confirmation gate.
@@ -49,7 +20,7 @@ on:
         description: "Version bump type"
         required: true
         type: choice
-        options: [patch, minor, major, pre, pre-major, rc, rc-major]
+        options: [patch, minor, major, pre-minor, pre-major, rc-minor, rc-major]
       base_branch:
         description: "Base branch to tag (e.g. main, releases/1.9.x)"
         required: true

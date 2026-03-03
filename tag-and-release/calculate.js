@@ -3,11 +3,39 @@
 // Calculates the next semantic version based on bump type and git tag history.
 //
 // Required env vars:
-//   BUMP        - one of: patch, minor, major, pre, pre-major, rc, rc-major
+//   BUMP        - one of: patch, minor, major, pre-minor, pre-major, rc-minor, rc-major
 //   BASE_BRANCH - the branch being tagged (e.g. "main" or "releases/1.3.x")
 //
 // The repo must already be checked out with full history and tags
 // (fetch-depth: 0, fetch-tags: true) before this script runs.
+//
+// Version bump logic (based on the latest tag reachable from BASE_BRANCH):
+//
+//   major      v1.2.3        → v2.0.0         + creates releases/2.0.x branch
+//   minor      v1.2.3        → v1.3.0         + creates releases/1.3.x branch
+//   patch      v1.2.3        → v1.2.4
+//   patch      v1.3.0-pre.N  → v1.3.0           (first stable; promotes pre to stable)
+//   patch      v1.3.0-rc.N   → v1.3.0           (first stable; promotes rc to stable)
+//
+//   (no tags)                → treated as v0.0.0 baseline for all bump types
+//
+//   pre-minor  v1.2.3        → v1.3.0-pre.0   + creates releases/1.3.x branch
+//   pre-minor  v1.3.0-pre.0  → v1.3.0-pre.1
+//   pre-minor  v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
+//
+//   pre-major  v1.2.3        → v2.0.0-pre.0   + creates releases/2.0.x branch
+//   pre-major  v1.2.3-pre.N  → ERROR (already on a pre-release; use 'pre-minor')
+//   pre-major  v1.2.3-rc.N   → ERROR (cannot go back to pre after rc)
+//
+//   rc-minor   v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
+//   rc-minor   v1.3.0-pre.N  → v1.3.0-rc.0      (releases/1.3.x already exists)
+//   rc-minor   v1.3.0-rc.N   → v1.3.0-rc.N+1    (releases/1.3.x already exists)
+//
+//   rc-major   v1.2.3        → v2.0.0-rc.0    + creates releases/2.0.x branch
+//   rc-major   v1.2.3-pre.N  → ERROR (already on a pre-release; use 'rc-minor')
+//
+// A release branch (releases/X.Y.x) is created for major, minor, rc-minor,
+// rc-major, and the first pre-minor/pre-major. Skipped if it already exists.
 
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -80,7 +108,7 @@ function latest(tags) {
 
 // ── Determine the "current" version used for display and parsing ──────────────
 
-const needsAllTags = ['pre', 'rc', 'pre-major', 'rc-major'].includes(BUMP);
+const needsAllTags = ['pre-minor', 'rc-minor', 'pre-major', 'rc-major'].includes(BUMP);
 const allMerged = getMergedTags();
 const stableMerged = getMergedTags({ stableOnly: true });
 
@@ -139,8 +167,8 @@ switch (BUMP) {
     break;
   }
 
-  case 'pre':
-    if (preType === 'rc') fail(`'pre' cannot follow an rc (${currentTag}).`);
+  case 'pre-minor':
+    if (preType === 'rc') fail(`'pre-minor' cannot follow an rc (${currentTag}).`);
     if (preType === 'pre') {
       newVersion = `v${major}.${minor}.${patch}-pre.${preNum + 1}`;
     } else {
@@ -150,7 +178,7 @@ switch (BUMP) {
     }
     break;
 
-  case 'rc':
+  case 'rc-minor':
     if (preType === 'rc') {
       newVersion = `v${major}.${minor}.${patch}-rc.${preNum + 1}`;
     } else if (preType === 'pre') {
@@ -165,14 +193,14 @@ switch (BUMP) {
 
   case 'pre-major':
     if (preType === 'rc') fail(`'pre-major' cannot follow an rc (${currentTag}).`);
-    if (preType) fail(`'pre-major' cannot be used when already on a pre-release (${currentTag}). Use 'pre' to continue the series.`);
+    if (preType) fail(`'pre-major' cannot be used when already on a pre-release (${currentTag}). Use 'pre-minor' to continue the series.`);
     newVersion = `v${major + 1}.0.0-pre.0`;
     createBranch = true;
     releaseBranch = `releases/${major + 1}.0.x`;
     break;
 
   case 'rc-major':
-    if (preType) fail(`'rc-major' cannot be used when already on a pre-release (${currentTag}). Use 'rc' to continue the series.`);
+    if (preType) fail(`'rc-major' cannot be used when already on a pre-release (${currentTag}). Use 'rc-minor' to continue the series.`);
     newVersion = `v${major + 1}.0.0-rc.0`;
     createBranch = true;
     releaseBranch = `releases/${major + 1}.0.x`;
