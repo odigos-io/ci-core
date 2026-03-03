@@ -1,0 +1,121 @@
+name: Generate Release Notes
+description: Generates release notes for a release
+
+inputs:
+  tag:
+    description: "Tag of the release"
+    required: true
+  release-branch:
+    description: "Release branch"
+    required: true
+  github-token:
+    description: "GitHub token"
+    required: true
+
+runs:
+  using: composite
+  steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Fetch main and release branches
+        shell: bash
+        run: |
+          git fetch origin main
+          git fetch origin 'refs/heads/releases/*:refs/remotes/origin/releases/*' 2>/dev/null || true
+
+      - name: Compute START_SHA and END_SHA
+        shell: bash
+        id: shas
+        run: |
+          TAG="${{ env.TAG }}"
+          END_SHA=$(git rev-parse HEAD)
+          echo "end_sha=${END_SHA}" >> $GITHUB_OUTPUT
+
+          # Scenario 1: rc0 (first release candidate on the release branch)
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc0$ ]]; then
+            BASE_VERSION=$(echo "$TAG" | sed 's/-rc0$//')
+            MINOR=$(echo "$BASE_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+)\.[0-9]+$/\2/')
+            MAJOR=$(echo "$BASE_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+)\.[0-9]+$/\1/')
+            PREV_MINOR=$((MINOR - 1))
+            PREV_RELEASE_BRANCH="origin/releases/v${MAJOR}.${PREV_MINOR}.0"
+            START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+            echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+            echo "Scenario: rc0 (first RC), PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
+
+          # Scenario 2: rcX (another release candidate, X >= 1)
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[1-9][0-9]*$ ]]; then
+            PREV_TAG=$(git tag --merged HEAD --sort=-v:refname | grep -v "^${TAG}$" | head -n 1)
+            START_SHA=$(git rev-parse "$PREV_TAG")
+            echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+            echo "Scenario: rcX, PREV_TAG=$PREV_TAG"
+
+          # Scenario 3: Promoting RC to stable (vX.Y.0)
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.0$ ]]; then
+            BASE_VERSION="$TAG"
+            MINOR=$(echo "$BASE_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+)\.[0-9]+$/\2/')
+            MAJOR=$(echo "$BASE_VERSION" | sed -E 's/^v([0-9]+)\.([0-9]+)\.[0-9]+$/\1/')
+            PREV_MINOR=$((MINOR - 1))
+            PREV_RELEASE_BRANCH="origin/releases/v${MAJOR}.${PREV_MINOR}.0"
+            START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+            echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+            echo "Scenario: RC to stable, PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
+
+          # Scenario 4: Patch release (vX.Y.Z, Z >= 1) or other tags — use previous tag by semver
+          else
+            PREV_TAG=$(git tag --merged HEAD --sort=-v:refname | grep -v "^${TAG}$" | head -n 1)
+            if [ -n "$PREV_TAG" ]; then
+              START_SHA=$(git rev-parse "$PREV_TAG")
+              echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+              echo "Scenario: tag range, PREV_TAG=$PREV_TAG"
+            else
+              echo "No previous tag found, using merge-base with main"
+              START_SHA=$(git merge-base origin/main HEAD)
+              echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      # This is temporary until https://github.com/kubernetes/release/pull/4272 is merged
+      - name: Build release-notes tool
+        shell: bash
+        run: |
+          git clone --depth 1 --branch release-notes-custom-regex https://github.com/damemi/k8s-release.git /tmp/k8s-release
+          cd /tmp/k8s-release
+          go build -o release-notes ./cmd/release-notes
+          echo "RELEASE_NOTES_BIN=$(pwd)/release-notes" >> $GITHUB_ENV
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ inputs.github-token }}
+        run: |
+          ${{ env.RELEASE_NOTES_BIN }} \
+            --org='odigos-io' \
+            --repo='odigos' \
+            --required-author='' \
+            --dependencies=false \
+            --release-note-regex='(?sU)```release-notes?\r?\n(?P<note>.+)\r?\n```' \
+            --branch=${{ inputs.release-branch }} \
+            --start-sha=${{ steps.shas.outputs.start_sha }} \
+            --end-sha=${{ steps.shas.outputs.end_sha }} \
+            --output=release-notes.md
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+      - name: Update GitHub release body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ inputs.github-token }}
+        run: |
+          gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
