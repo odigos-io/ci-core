@@ -13,19 +13,30 @@ run-name: "Tag and Release · ${{ inputs.bump }} on ${{ inputs.base_branch }}"
 #
 #   (no tags)            → treated as v0.0.0 baseline for all bump types
 #
-#   pre    v1.2.3        → v1.3.0-pre.0   + creates releases/1.3.x branch
-#   pre    v1.3.0-pre.0  → v1.3.0-pre.1
-#   pre    v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
+#   pre          v1.2.3        → v1.3.0-pre.0   + creates releases/1.3.x branch
+#   pre          v1.3.0-pre.0  → v1.3.0-pre.1
+#   pre          v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
 #
-#   rc     v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
-#   rc     v1.3.0-pre.N  → v1.3.0-rc.0    (releases/1.3.x already exists)
-#   rc     v1.3.0-rc.N   → v1.3.0-rc.N+1  (releases/1.3.x already exists)
+#   pre-major    v1.2.3        → v2.0.0-pre.0   + creates releases/2.0.x branch
+#   pre-major    v1.2.3-pre.N  → ERROR (already on a pre-release; use 'pre')
+#   pre-major    v1.2.3-rc.N   → ERROR (cannot go back to pre after rc)
 #
-# A release branch (releases/X.Y.x) is created whenever a new rc or a first
-# pre is started. If the branch already exists the step is skipped safely.
+#   rc           v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
+#   rc           v1.3.0-pre.N  → v1.3.0-rc.0    (releases/1.3.x already exists)
+#   rc           v1.3.0-rc.N   → v1.3.0-rc.N+1  (releases/1.3.x already exists)
+#
+#   rc-major     v1.2.3        → v2.0.0-rc.0    + creates releases/2.0.x branch
+#   rc-major     v1.2.3-pre.N  → ERROR (already on a pre-release; use 'rc')
+#
+# A release branch (releases/X.Y.x) is created whenever a new rc/rc-major or a
+# first pre/pre-major is started. If the branch already exists the step is skipped.
 #
 # Requires a GitHub Environment named "release-gate" configured with
 # required reviewers to serve as the confirmation gate.
+
+concurrency:
+  group: tag-and-release
+  cancel-in-progress: false
 
 permissions: read-all
 
@@ -36,7 +47,7 @@ on:
         description: "Version bump type"
         required: true
         type: choice
-        options: [patch, minor, major, pre, rc]
+        options: [patch, minor, major, pre, pre-major, rc, rc-major]
       base_branch:
         description: "Base branch to tag (e.g. main, releases/1.9.x)"
         required: true
@@ -54,6 +65,13 @@ jobs:
       create_branch: ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
     steps:
+      - name: Enforce dispatch from main
+        run: |
+          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "::error::This workflow must be dispatched from main (got ${{ github.ref }})."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.base_branch }}
@@ -115,15 +133,37 @@ jobs:
             rc)
               if [[ "$PRE_TYPE" == "rc" ]]; then
                 NEW="v${MAJOR}.${MINOR}.${PATCH}-rc.$((PRE_NUM+1))"
+                # branch already exists from when the rc series started
               elif [[ "$PRE_TYPE" == "pre" ]]; then
                 NEW="v${MAJOR}.${MINOR}.${PATCH}-rc.0"
+                # branch already exists from when the pre series started
               else
                 NEW="v${MAJOR}.$((MINOR+1)).0-rc.0"
+                CREATE_BRANCH="true"
+                _VER=${NEW#v}
+                BRANCH="releases/$(echo "$_VER" | cut -d. -f1).$(echo "$_VER" | cut -d. -f2).x"
               fi
+              ;;
+            pre-major)
+              if [[ "$PRE_TYPE" == "rc" ]]; then
+                echo "::error::Invalid: 'pre-major' cannot follow an rc (${CURRENT})."
+                exit 1
+              elif [[ -n "$PRE_TYPE" ]]; then
+                echo "::error::Invalid: 'pre-major' cannot be used when already on a pre-release (${CURRENT}). Use 'pre' to continue the series."
+                exit 1
+              fi
+              NEW="v$((MAJOR+1)).0.0-pre.0"
               CREATE_BRANCH="true"
-              # Derive branch from the computed new version's major.minor
-              _VER=${NEW#v}
-              BRANCH="releases/$(echo "$_VER" | cut -d. -f1).$(echo "$_VER" | cut -d. -f2).x"
+              BRANCH="releases/$((MAJOR+1)).0.x"
+              ;;
+            rc-major)
+              if [[ -n "$PRE_TYPE" ]]; then
+                echo "::error::Invalid: 'rc-major' cannot be used when already on a pre-release (${CURRENT}). Use 'rc' to continue the series."
+                exit 1
+              fi
+              NEW="v$((MAJOR+1)).0.0-rc.0"
+              CREATE_BRANCH="true"
+              BRANCH="releases/$((MAJOR+1)).0.x"
               ;;
           esac
 
