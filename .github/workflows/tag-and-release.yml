@@ -7,8 +7,8 @@ run-name: "Tag and Release · ${{ inputs.bump }} on ${{ inputs.base_branch }}"
 #
 # Version bump logic (based on the latest tag reachable from base_branch):
 #
-#   major  v1.2.3        → v2.0.0
-#   minor  v1.2.3        → v1.3.0
+#   major  v1.2.3        → v2.0.0   + creates releases/2.0.x branch
+#   minor  v1.2.3        → v1.3.0   + creates releases/1.3.x branch
 #   patch  v1.2.3        → v1.2.4
 #   patch  v1.3.0-pre.N  → v1.3.0   (first stable; promotes pre/rc to stable)
 #   patch  v1.3.0-rc.N   → v1.3.0   (first stable; promotes pre/rc to stable)

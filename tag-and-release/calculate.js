@@ -100,10 +100,14 @@ let releaseBranch = '';
 switch (BUMP) {
   case 'major':
     newVersion = `v${major + 1}.0.0`;
+    createBranch = true;
+    releaseBranch = `releases/${major + 1}.0.x`;
     break;
 
   case 'minor':
     newVersion = `v${major}.${minor + 1}.0`;
+    createBranch = true;
+    releaseBranch = `releases/${major}.${minor + 1}.x`;
     break;
 
   case 'patch': {
@@ -117,12 +121,13 @@ switch (BUMP) {
         newVersion = `v${major}.${minor}.${patch + 1}`;
       } else {
         const baseVer = `v${lav.major}.${lav.minor}.${lav.patch}`;
-        displayCurrent = latestAny;
         if (tagExists(baseVer)) {
           // Stable base already exists globally (maybe tagged on a sibling
-          // branch line) — increment from it rather than re-creating it
+          // branch line) — show it as current and increment from it
+          displayCurrent = baseVer;
           newVersion = `v${lav.major}.${lav.minor}.${lav.patch + 1}`;
         } else {
+          displayCurrent = latestAny;
           // Stable base not yet released — promote pre/rc to stable
           newVersion = baseVer;
         }
