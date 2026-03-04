@@ -27,21 +27,21 @@ Go to **Actions → Tag and Release → Run workflow** and fill in:
 
 | Bump | Current | → New | Branch created? |
 |---|---|---|---|
-| `major` | `v1.2.3` | `v2.0.0` | ✅ `releases/2.0.x` |
+| `major` | `v1.2.3` | `v2.0.0` | ✅ `releases/v2.0.x` |
 | `major` | `v2.0.0-pre.N` | `v2.0.0` | — *(promotes pre to stable; branch already exists)* |
-| `minor` | `v1.2.3` | `v1.3.0` | ✅ `releases/1.3.x` |
+| `minor` | `v1.2.3` | `v1.3.0` | ✅ `releases/v1.3.x` |
 | `minor` | `v1.3.0-pre.N` | `v1.3.0` | — *(promotes pre to stable; branch already exists)* |
 | `patch` | `v1.2.3` | `v1.2.4` | — |
-| `patch` | `v1.3.0-pre.N` | `v1.3.0` | — *(on `releases/X.Y.x`: promotes to stable)* |
-| `patch` | `v1.3.0-rc.N` | `v1.3.0` | — *(on `releases/X.Y.x`: promotes to stable)* |
-| `pre-minor` | `v1.2.3` | `v1.3.0-pre.0` | ✅ `releases/1.3.x` |
+| `patch` | `v1.3.0-pre.N` | `v1.3.0` | — *(on `releases/vX.Y.x`: promotes to stable)* |
+| `patch` | `v1.3.0-rc.N` | `v1.3.0` | — *(on `releases/vX.Y.x`: promotes to stable)* |
+| `pre-minor` | `v1.2.3` | `v1.3.0-pre.0` | ✅ `releases/v1.3.x` |
 | `pre-minor` | `v1.3.0-pre.N` | `v1.3.0-pre.N+1` | — |
-| `pre-major` | `v1.2.3` | `v2.0.0-pre.0` | ✅ `releases/2.0.x` |
+| `pre-major` | `v1.2.3` | `v2.0.0-pre.0` | ✅ `releases/v2.0.x` |
 | `pre-major` | `v2.0.0-pre.N` | `v2.0.0-pre.N+1` | — |
-| `rc-minor` | `v1.2.3` | `v1.3.0-rc.0` | ✅ `releases/1.3.x` |
+| `rc-minor` | `v1.2.3` | `v1.3.0-rc.0` | ✅ `releases/v1.3.x` |
 | `rc-minor` | `v1.3.0-pre.N` | `v1.3.0-rc.0` | — *(branch already exists)* |
 | `rc-minor` | `v1.3.0-rc.N` | `v1.3.0-rc.N+1` | — |
-| `rc-major` | `v1.2.3` | `v2.0.0-rc.0` | ✅ `releases/2.0.x` |
+| `rc-major` | `v1.2.3` | `v2.0.0-rc.0` | ✅ `releases/v2.0.x` |
 | `rc-major` | `v2.0.0-pre.N` | `v2.0.0-rc.0` | — *(branch already exists)* |
 | `rc-major` | `v2.0.0-rc.N` | `v2.0.0-rc.N+1` | — |
 

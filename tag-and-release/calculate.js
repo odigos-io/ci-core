@@ -4,40 +4,40 @@
 //
 // Required env vars:
 //   BUMP        - one of: patch, minor, major, pre-minor, pre-major, rc-minor, rc-major
-//   BASE_BRANCH - the branch being tagged (e.g. "main" or "releases/1.3.x")
+//   BASE_BRANCH - the branch being tagged (e.g. "main" or "releases/v1.3.x")
 //
 // The repo must already be checked out with full history and tags
 // (fetch-depth: 0, fetch-tags: true) before this script runs.
 //
 // Version bump logic (based on the latest tag reachable from BASE_BRANCH):
 //
-//   major      v1.2.3        → v2.0.0         + creates releases/2.0.x branch
+//   major      v1.2.3        → v2.0.0         + creates releases/v2.0.x branch
 //   major      v2.0.0-pre.N  → v2.0.0           (promotes pre to stable; branch already exists)
-//   minor      v1.2.3        → v1.3.0         + creates releases/1.3.x branch
+//   minor      v1.2.3        → v1.3.0         + creates releases/v1.3.x branch
 //   minor      v1.3.0-pre.N  → v1.3.0           (promotes pre to stable; branch already exists)
 //   patch      v1.2.3        → v1.2.4
-//   patch      v1.3.0-pre.N  → v1.3.0           (on releases/X.Y.x: promotes pre to stable)
-//   patch      v1.3.0-rc.N   → v1.3.0           (on releases/X.Y.x: promotes rc to stable)
+//   patch      v1.3.0-pre.N  → v1.3.0           (on releases/vX.Y.x: promotes pre to stable)
+//   patch      v1.3.0-rc.N   → v1.3.0           (on releases/vX.Y.x: promotes rc to stable)
 //
 //   (no tags)                → treated as v0.0.0 baseline for all bump types
 //
-//   pre-minor  v1.2.3        → v1.3.0-pre.0   + creates releases/1.3.x branch
+//   pre-minor  v1.2.3        → v1.3.0-pre.0   + creates releases/v1.3.x branch
 //   pre-minor  v1.3.0-pre.0  → v1.3.0-pre.1
 //   pre-minor  v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
 //
-//   pre-major  v1.2.3        → v2.0.0-pre.0   + creates releases/2.0.x branch
+//   pre-major  v1.2.3        → v2.0.0-pre.0   + creates releases/v2.0.x branch
 //   pre-major  v2.0.0-pre.N  → v2.0.0-pre.N+1
 //   pre-major  v2.0.0-rc.N   → ERROR (cannot go back to pre after rc)
 //
-//   rc-minor   v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
-//   rc-minor   v1.3.0-pre.N  → v1.3.0-rc.0      (releases/1.3.x already exists)
-//   rc-minor   v1.3.0-rc.N   → v1.3.0-rc.N+1    (releases/1.3.x already exists)
+//   rc-minor   v1.2.3        → v1.3.0-rc.0    + creates releases/v1.3.x branch
+//   rc-minor   v1.3.0-pre.N  → v1.3.0-rc.0      (releases/v1.3.x already exists)
+//   rc-minor   v1.3.0-rc.N   → v1.3.0-rc.N+1    (releases/v1.3.x already exists)
 //
-//   rc-major   v1.2.3        → v2.0.0-rc.0    + creates releases/2.0.x branch
-//   rc-major   v2.0.0-pre.N  → v2.0.0-rc.0      (releases/2.0.x already exists)
-//   rc-major   v2.0.0-rc.N   → v2.0.0-rc.N+1    (releases/2.0.x already exists)
+//   rc-major   v1.2.3        → v2.0.0-rc.0    + creates releases/v2.0.x branch
+//   rc-major   v2.0.0-pre.N  → v2.0.0-rc.0      (releases/v2.0.x already exists)
+//   rc-major   v2.0.0-rc.N   → v2.0.0-rc.N+1    (releases/v2.0.x already exists)
 //
-// A release branch (releases/X.Y.x) is created for major, minor, rc-minor,
+// A release branch (releases/vX.Y.x) is created for major, minor, rc-minor,
 // rc-major, and the first pre-minor/pre-major. Skipped if it already exists.
 
 const { execSync } = require('child_process');
@@ -109,9 +109,9 @@ function latest(tags) {
   return tags.length ? tags[tags.length - 1] : null;
 }
 
-// Parses the major.minor series from a release branch name, e.g. "releases/1.3.x" → {major:1, minor:3}
+// Parses the major.minor series from a release branch name, e.g. "releases/v1.3.x" → {major:1, minor:3}
 function parseBranchSeries(branch) {
-  const m = /^releases\/(\d+)\.(\d+)\.x$/.exec(branch);
+  const m = /^releases\/v(\d+)\.(\d+)\.x$/.exec(branch);
   if (!m) return null;
   return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10) };
 }
@@ -152,7 +152,7 @@ switch (BUMP) {
   case 'major': {
     const tMaj = major + 1;
     newVersion = `v${tMaj}.0.0`;
-    releaseBranch = `releases/${tMaj}.0.x`;
+    releaseBranch = `releases/v${tMaj}.0.x`;
     const existingPre = latestPreFor(tMaj, 0);
     if (existingPre) { displayCurrent = existingPre; }
     else { createBranch = true; }
@@ -162,7 +162,7 @@ switch (BUMP) {
   case 'minor': {
     const tMin = minor + 1;
     newVersion = `v${major}.${tMin}.0`;
-    releaseBranch = `releases/${major}.${tMin}.x`;
+    releaseBranch = `releases/v${major}.${tMin}.x`;
     const existingPre = latestPreFor(major, tMin);
     if (existingPre) { displayCurrent = existingPre; }
     else { createBranch = true; }
@@ -210,7 +210,7 @@ switch (BUMP) {
     // On main, target the next minor from the latest stable.
     const bs = parseBranchSeries(BASE_BRANCH);
     const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
-    releaseBranch = `releases/${tMaj}.${tMin}.x`;
+    releaseBranch = `releases/v${tMaj}.${tMin}.x`;
     const rc  = latestPreFor(tMaj, tMin, 'rc');
     if (rc) fail(`'pre-minor' cannot follow an rc (${rc}).`);
     const pre = latestPreFor(tMaj, tMin, 'pre');
@@ -227,7 +227,7 @@ switch (BUMP) {
   case 'rc-minor': {
     const bs = parseBranchSeries(BASE_BRANCH);
     const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
-    releaseBranch = `releases/${tMaj}.${tMin}.x`;
+    releaseBranch = `releases/v${tMaj}.${tMin}.x`;
     const rc  = latestPreFor(tMaj, tMin, 'rc');
     const pre = latestPreFor(tMaj, tMin, 'pre');
     if (rc) {
@@ -243,7 +243,7 @@ switch (BUMP) {
 
   case 'pre-major': {
     const tMaj = major + 1;
-    releaseBranch = `releases/${tMaj}.0.x`;
+    releaseBranch = `releases/v${tMaj}.0.x`;
     const rc  = latestPreFor(tMaj, 0, 'rc');
     if (rc) fail(`'pre-major' cannot follow an rc (${rc}).`);
     const pre = latestPreFor(tMaj, 0, 'pre');
@@ -259,7 +259,7 @@ switch (BUMP) {
 
   case 'rc-major': {
     const tMaj = major + 1;
-    releaseBranch = `releases/${tMaj}.0.x`;
+    releaseBranch = `releases/v${tMaj}.0.x`;
     const rc  = latestPreFor(tMaj, 0, 'rc');
     const pre = latestPreFor(tMaj, 0, 'pre');
     if (rc) {
