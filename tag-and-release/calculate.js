@@ -26,15 +26,16 @@
 //   pre-minor  v1.3.0-rc.0   → ERROR (cannot go back to pre after rc)
 //
 //   pre-major  v1.2.3        → v2.0.0-pre.0   + creates releases/2.0.x branch
-//   pre-major  v1.2.3-pre.N  → ERROR (already on a pre-release; use 'pre-minor')
-//   pre-major  v1.2.3-rc.N   → ERROR (cannot go back to pre after rc)
+//   pre-major  v2.0.0-pre.N  → v2.0.0-pre.N+1
+//   pre-major  v2.0.0-rc.N   → ERROR (cannot go back to pre after rc)
 //
 //   rc-minor   v1.2.3        → v1.3.0-rc.0    + creates releases/1.3.x branch
 //   rc-minor   v1.3.0-pre.N  → v1.3.0-rc.0      (releases/1.3.x already exists)
 //   rc-minor   v1.3.0-rc.N   → v1.3.0-rc.N+1    (releases/1.3.x already exists)
 //
 //   rc-major   v1.2.3        → v2.0.0-rc.0    + creates releases/2.0.x branch
-//   rc-major   v1.2.3-pre.N  → ERROR (already on a pre-release; use 'rc-minor')
+//   rc-major   v2.0.0-pre.N  → v2.0.0-rc.0      (releases/2.0.x already exists)
+//   rc-major   v2.0.0-rc.N   → v2.0.0-rc.N+1    (releases/2.0.x already exists)
 //
 // A release branch (releases/X.Y.x) is created for major, minor, rc-minor,
 // rc-major, and the first pre-minor/pre-major. Skipped if it already exists.
@@ -246,19 +247,29 @@ switch (BUMP) {
     const rc  = latestPreFor(tMaj, 0, 'rc');
     if (rc) fail(`'pre-major' cannot follow an rc (${rc}).`);
     const pre = latestPreFor(tMaj, 0, 'pre');
-    if (pre) fail(`'pre-major' cannot be used when pre-releases already exist (${pre}). Use 'pre-minor' to continue the series.`);
-    newVersion = `v${tMaj}.0.0-pre.0`;
-    createBranch = true;
+    if (pre) {
+      newVersion = `v${tMaj}.0.0-pre.${parseVersion(pre).preNum + 1}`;
+      displayCurrent = pre;
+    } else {
+      newVersion = `v${tMaj}.0.0-pre.0`;
+      createBranch = true;
+    }
     break;
   }
 
   case 'rc-major': {
     const tMaj = major + 1;
     releaseBranch = `releases/${tMaj}.0.x`;
-    const any = latestPreFor(tMaj, 0);
-    if (any) fail(`'rc-major' cannot be used when pre-releases already exist (${any}). Use 'rc-minor' to continue the series.`);
-    newVersion = `v${tMaj}.0.0-rc.0`;
-    createBranch = true;
+    const rc  = latestPreFor(tMaj, 0, 'rc');
+    const pre = latestPreFor(tMaj, 0, 'pre');
+    if (rc) {
+      newVersion = `v${tMaj}.0.0-rc.${parseVersion(rc).preNum + 1}`;
+      displayCurrent = rc;
+    } else {
+      newVersion = `v${tMaj}.0.0-rc.0`;
+      if (pre) { displayCurrent = pre; }
+      else { createBranch = true; }
+    }
     break;
   }
 

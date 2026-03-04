@@ -37,14 +37,17 @@ Go to **Actions → Tag and Release → Run workflow** and fill in:
 | `pre-minor` | `v1.2.3` | `v1.3.0-pre.0` | ✅ `releases/1.3.x` |
 | `pre-minor` | `v1.3.0-pre.N` | `v1.3.0-pre.N+1` | — |
 | `pre-major` | `v1.2.3` | `v2.0.0-pre.0` | ✅ `releases/2.0.x` |
+| `pre-major` | `v2.0.0-pre.N` | `v2.0.0-pre.N+1` | — |
 | `rc-minor` | `v1.2.3` | `v1.3.0-rc.0` | ✅ `releases/1.3.x` |
 | `rc-minor` | `v1.3.0-pre.N` | `v1.3.0-rc.0` | — *(branch already exists)* |
 | `rc-minor` | `v1.3.0-rc.N` | `v1.3.0-rc.N+1` | — |
 | `rc-major` | `v1.2.3` | `v2.0.0-rc.0` | ✅ `releases/2.0.x` |
+| `rc-major` | `v2.0.0-pre.N` | `v2.0.0-rc.0` | — *(branch already exists)* |
+| `rc-major` | `v2.0.0-rc.N` | `v2.0.0-rc.N+1` | — |
 
 No tags → treated as `v0.0.0` baseline for all bump types.
 
-**Error cases:** `pre-minor` / `pre-major` cannot follow an `rc`. `pre-major` / `rc-major` cannot be used when pre-releases already exist for the target version.
+**Error cases:** `pre-minor` / `pre-major` cannot follow an `rc`.
 
 ---
 
