@@ -30,7 +30,9 @@ The workflow runs three jobs:
 | Bump | Current | → New | Branch created? |
 |---|---|---|---|
 | `major` | `v1.2.3` | `v2.0.0` | ✅ `releases/2.0.x` |
+| `major` | `v2.0.0-pre.N` | `v2.0.0` | — *(promotes pre to stable; branch already exists)* |
 | `minor` | `v1.2.3` | `v1.3.0` | ✅ `releases/1.3.x` |
+| `minor` | `v1.3.0-pre.N` | `v1.3.0` | — *(promotes pre to stable; branch already exists)* |
 | `patch` | `v1.2.3` | `v1.2.4` | — |
 | `patch` | `v1.3.0-pre.N` | `v1.3.0` | — *(promotes to stable)* |
 | `patch` | `v1.3.0-rc.N` | `v1.3.0` | — *(promotes to stable)* |
