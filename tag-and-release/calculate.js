@@ -115,6 +115,16 @@ function parseBranchSeries(branch) {
   return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10) };
 }
 
+// Returns the latest pre-release tag for the given major.minor.0 coordinate.
+// type: 'pre' | 'rc' | null (null matches any pre-release)
+function latestPreFor(maj, min, type = null) {
+  return latest(allMerged.filter((t) => {
+    const v = parseVersion(t);
+    return v && v.major === maj && v.minor === min && v.patch === 0
+      && (type ? v.preType === type : v.preType);
+  }));
+}
+
 // ── Determine the "current" version used for display and parsing ──────────────
 
 const allMerged = getMergedTags();
@@ -139,34 +149,22 @@ let releaseBranch = '';
 
 switch (BUMP) {
   case 'major': {
-    newVersion = `v${major + 1}.0.0`;
-    releaseBranch = `releases/${major + 1}.0.x`;
-    const existingMajorPre = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === major + 1 && v.minor === 0 && v.patch === 0 && v.preType;
-    }));
-    if (existingMajorPre) {
-      displayCurrent = existingMajorPre;
-      createBranch = false;
-    } else {
-      createBranch = true;
-    }
+    const tMaj = major + 1;
+    newVersion = `v${tMaj}.0.0`;
+    releaseBranch = `releases/${tMaj}.0.x`;
+    const existingPre = latestPreFor(tMaj, 0);
+    if (existingPre) { displayCurrent = existingPre; }
+    else { createBranch = true; }
     break;
   }
 
   case 'minor': {
-    newVersion = `v${major}.${minor + 1}.0`;
-    releaseBranch = `releases/${major}.${minor + 1}.x`;
-    const existingMinorPre = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === major && v.minor === minor + 1 && v.patch === 0 && v.preType;
-    }));
-    if (existingMinorPre) {
-      displayCurrent = existingMinorPre;
-      createBranch = false;
-    } else {
-      createBranch = true;
-    }
+    const tMin = minor + 1;
+    newVersion = `v${major}.${tMin}.0`;
+    releaseBranch = `releases/${major}.${tMin}.x`;
+    const existingPre = latestPreFor(major, tMin);
+    if (existingPre) { displayCurrent = existingPre; }
+    else { createBranch = true; }
     break;
   }
 
@@ -207,21 +205,17 @@ switch (BUMP) {
   }
 
   case 'pre-minor': {
-    const [tMaj, tMin] = [major, minor + 1];
+    // On a release branch, target that branch's series (e.g. releases/2.0.x → v2.0).
+    // On main, target the next minor from the latest stable.
+    const bs = parseBranchSeries(BASE_BRANCH);
+    const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
     releaseBranch = `releases/${tMaj}.${tMin}.x`;
-    const rcForMinor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === tMin && v.patch === 0 && v.preType === 'rc';
-    }));
-    if (rcForMinor) fail(`'pre-minor' cannot follow an rc (${rcForMinor}).`);
-    const preForMinor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === tMin && v.patch === 0 && v.preType === 'pre';
-    }));
-    if (preForMinor) {
-      const lv = parseVersion(preForMinor);
-      newVersion = `v${tMaj}.${tMin}.0-pre.${lv.preNum + 1}`;
-      displayCurrent = preForMinor;
+    const rc  = latestPreFor(tMaj, tMin, 'rc');
+    if (rc) fail(`'pre-minor' cannot follow an rc (${rc}).`);
+    const pre = latestPreFor(tMaj, tMin, 'pre');
+    if (pre) {
+      newVersion = `v${tMaj}.${tMin}.0-pre.${parseVersion(pre).preNum + 1}`;
+      displayCurrent = pre;
     } else {
       newVersion = `v${tMaj}.${tMin}.0-pre.0`;
       createBranch = true;
@@ -230,28 +224,18 @@ switch (BUMP) {
   }
 
   case 'rc-minor': {
-    const [tMaj, tMin] = [major, minor + 1];
+    const bs = parseBranchSeries(BASE_BRANCH);
+    const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
     releaseBranch = `releases/${tMaj}.${tMin}.x`;
-    const rcForMinor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === tMin && v.patch === 0 && v.preType === 'rc';
-    }));
-    if (rcForMinor) {
-      const lv = parseVersion(rcForMinor);
-      newVersion = `v${tMaj}.${tMin}.0-rc.${lv.preNum + 1}`;
-      displayCurrent = rcForMinor;
+    const rc  = latestPreFor(tMaj, tMin, 'rc');
+    const pre = latestPreFor(tMaj, tMin, 'pre');
+    if (rc) {
+      newVersion = `v${tMaj}.${tMin}.0-rc.${parseVersion(rc).preNum + 1}`;
+      displayCurrent = rc;
     } else {
-      const preForMinor = latest(allMerged.filter((t) => {
-        const v = parseVersion(t);
-        return v && v.major === tMaj && v.minor === tMin && v.patch === 0 && v.preType === 'pre';
-      }));
-      if (preForMinor) {
-        newVersion = `v${tMaj}.${tMin}.0-rc.0`;
-        displayCurrent = preForMinor;
-      } else {
-        newVersion = `v${tMaj}.${tMin}.0-rc.0`;
-        createBranch = true;
-      }
+      newVersion = `v${tMaj}.${tMin}.0-rc.0`;
+      if (pre) { displayCurrent = pre; }
+      else { createBranch = true; }
     }
     break;
   }
@@ -259,16 +243,10 @@ switch (BUMP) {
   case 'pre-major': {
     const tMaj = major + 1;
     releaseBranch = `releases/${tMaj}.0.x`;
-    const rcForMajor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === 0 && v.patch === 0 && v.preType === 'rc';
-    }));
-    if (rcForMajor) fail(`'pre-major' cannot follow an rc (${rcForMajor}).`);
-    const preForMajor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === 0 && v.patch === 0 && v.preType === 'pre';
-    }));
-    if (preForMajor) fail(`'pre-major' cannot be used when pre-releases already exist (${preForMajor}). Use 'pre-minor' to continue the series.`);
+    const rc  = latestPreFor(tMaj, 0, 'rc');
+    if (rc) fail(`'pre-major' cannot follow an rc (${rc}).`);
+    const pre = latestPreFor(tMaj, 0, 'pre');
+    if (pre) fail(`'pre-major' cannot be used when pre-releases already exist (${pre}). Use 'pre-minor' to continue the series.`);
     newVersion = `v${tMaj}.0.0-pre.0`;
     createBranch = true;
     break;
@@ -277,11 +255,8 @@ switch (BUMP) {
   case 'rc-major': {
     const tMaj = major + 1;
     releaseBranch = `releases/${tMaj}.0.x`;
-    const anyForMajor = latest(allMerged.filter((t) => {
-      const v = parseVersion(t);
-      return v && v.major === tMaj && v.minor === 0 && v.patch === 0 && v.preType;
-    }));
-    if (anyForMajor) fail(`'rc-major' cannot be used when pre-releases already exist (${anyForMajor}). Use 'rc-minor' to continue the series.`);
+    const any = latestPreFor(tMaj, 0);
+    if (any) fail(`'rc-major' cannot be used when pre-releases already exist (${any}). Use 'rc-minor' to continue the series.`);
     newVersion = `v${tMaj}.0.0-rc.0`;
     createBranch = true;
     break;
