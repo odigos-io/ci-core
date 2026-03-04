@@ -2,28 +2,26 @@
 
 Semantic version tagging and GitHub release creation, with a human approval gate.
 
-Two parts:
-- **`tag-and-release.yml`** — a `workflow_dispatch` workflow you trigger manually to cut a release.
-- **`tag-and-release/action.yml`** — a reusable composite action (used internally by the workflow, and available for other repos).
-
 ---
 
-## Workflow: Triggering a release
+## What it does
+
+Runs three jobs when triggered:
+
+1. **calculate** — computes the next version from git tag history and writes a preview to the job summary.
+2. **confirm** — pauses at the `release-gate` environment for human approval.
+3. **tag** — creates an annotated git tag, pushes it, creates a GitHub release, and (when required) creates the release branch.
+
+Rejecting or dismissing the gate cancels the run. No tag is created.
+
+### Trigger
 
 Go to **Actions → Tag and Release → Run workflow** and fill in:
 
 | Input | Description | Example |
 |---|---|---|
-| `bump` | Version bump type (see table below) | `minor` |
+| `bump` | Version bump type | `minor` |
 | `base_branch` | Branch to tag | `main` or `releases/1.3.x` |
-
-The workflow runs three jobs:
-
-1. **calculate** — computes the next version and shows a preview summary.
-2. **confirm** — pauses at the `release-gate` environment for manual approval.
-3. **tag** — creates the annotated git tag, GitHub release, and release branch (when required).
-
-> Rejecting or dismissing the gate cancels the run. No tag is created.
 
 ### Version bump logic
 
@@ -34,8 +32,8 @@ The workflow runs three jobs:
 | `minor` | `v1.2.3` | `v1.3.0` | ✅ `releases/1.3.x` |
 | `minor` | `v1.3.0-pre.N` | `v1.3.0` | — *(promotes pre to stable; branch already exists)* |
 | `patch` | `v1.2.3` | `v1.2.4` | — |
-| `patch` | `v1.3.0-pre.N` | `v1.3.0` | — *(promotes to stable)* |
-| `patch` | `v1.3.0-rc.N` | `v1.3.0` | — *(promotes to stable)* |
+| `patch` | `v1.3.0-pre.N` | `v1.3.0` | — *(on `releases/X.Y.x`: promotes to stable)* |
+| `patch` | `v1.3.0-rc.N` | `v1.3.0` | — *(on `releases/X.Y.x`: promotes to stable)* |
 | `pre-minor` | `v1.2.3` | `v1.3.0-pre.0` | ✅ `releases/1.3.x` |
 | `pre-minor` | `v1.3.0-pre.N` | `v1.3.0-pre.N+1` | — |
 | `pre-major` | `v1.2.3` | `v2.0.0-pre.0` | ✅ `releases/2.0.x` |
@@ -46,22 +44,23 @@ The workflow runs three jobs:
 
 No tags → treated as `v0.0.0` baseline for all bump types.
 
-**Error cases:** `pre-minor` / `pre-major` cannot follow an `rc`. `pre-major` / `rc-major` cannot be used when already on a pre-release.
+**Error cases:** `pre-minor` / `pre-major` cannot follow an `rc`. `pre-major` / `rc-major` cannot be used when pre-releases already exist for the target version.
 
 ---
 
-## Prerequisites
+## What you need
 
-### `release-gate` environment
+### 1. `release-gate` environment
 
-Create a GitHub Environment named **`release-gate`** with required reviewers. The workflow pauses there waiting for approval before creating any tag.
+Create a GitHub Environment named **`release-gate`** with required reviewers. The workflow pauses there before creating any tag.
 
-### STS identity
+### 2. STS identity
 
-The `tag` job authenticates via [octo-sts](../sts/README.md). An identity file must exist in this repo granting `contents: write`:
+The `tag` job authenticates via [octo-sts](../sts/README.md). An identity file must exist in the **target repo** granting `contents: write`:
 
 ```yaml
-# .github/chainguard/<identity-name>.sts.yaml
+# filename -> .github/chainguard/<identity-name>.sts.yaml
+# Make sure to update the subject_pattern to match your repo and workflow structure!
 issuer: https://token.actions.githubusercontent.com
 subject_pattern: '^repo:odigos-io/ci-core:(tag:.*|ref:refs/heads/.*)$'
 
@@ -69,50 +68,82 @@ permissions:
   contents: write
 ```
 
----
+### 3. Job permissions
 
-## Composite action
-
-The `tag-and-release` action can be used directly in other workflows.
+The job calling `operation: tag` must declare:
 
 ```yaml
-- uses: actions/checkout@v4
-  with:
-    ref: ${{ inputs.base_branch }}
-    fetch-depth: 0
-    fetch-tags: true
-
-- id: calc
-  uses: odigos-io/ci-core/tag-and-release@main
-  with:
-    operation: calculate
-    bump: ${{ inputs.bump }}
-    base_branch: ${{ inputs.base_branch }}
-
-# ... approval gate job ...
-
-- uses: actions/checkout@v4
-  with:
-    ref: ${{ inputs.base_branch }}
-    fetch-depth: 0
-    fetch-tags: true
-    persist-credentials: false
-
-- uses: odigos-io/ci-core/tag-and-release@main
-  with:
-    operation: tag
-    bump: ${{ inputs.bump }}
-    base_branch: ${{ inputs.base_branch }}
-    new_version: ${{ needs.calculate.outputs.new_version }}
-    create_branch: ${{ needs.calculate.outputs.create_branch }}
-    release_branch: ${{ needs.calculate.outputs.release_branch }}
-    actor: ${{ github.actor }}
-    run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    sts_scope: your-org/your-repo
-    sts_identity: your-identity
+permissions:
+  id-token: write  # required for STS OIDC exchange
+  contents: read   # required for checkout
 ```
 
-### Inputs
+And the checkout step must set `persist-credentials: false` so that the STS token is used for pushes.
+
+---
+
+## Using as an action
+
+The `tag-and-release` action can be called directly from other workflows, just like the workflow example below. You could simply copy-paste it 
+
+```yaml
+jobs:
+  calculate:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version:    ${{ steps.calc.outputs.new_version }}
+      create_branch:  ${{ steps.calc.outputs.create_branch }}
+      release_branch: ${{ steps.calc.outputs.release_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: calc
+        uses: odigos-io/ci-core/tag-and-release@main
+        with:
+          operation: calculate
+          bump: ${{ inputs.bump }}
+          base_branch: ${{ inputs.base_branch }}
+
+  confirm:
+    needs: calculate
+    runs-on: ubuntu-latest
+    environment: release-gate
+    steps:
+      - run: echo "Approved"
+
+  tag:
+    needs: [calculate, confirm]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - uses: odigos-io/ci-core/tag-and-release@main
+        with:
+          operation: tag
+          bump: ${{ inputs.bump }}
+          base_branch: ${{ inputs.base_branch }}
+          new_version:    ${{ needs.calculate.outputs.new_version }}
+          create_branch:  ${{ needs.calculate.outputs.create_branch }}
+          release_branch: ${{ needs.calculate.outputs.release_branch }}
+          actor:   ${{ github.actor }}
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          sts_scope:    your-org/your-repo
+          sts_identity: your-identity
+```
+
+### Inputs & Options
 
 **`operation: calculate`**
 
@@ -134,8 +165,6 @@ The `tag-and-release` action can be used directly in other workflows.
 | `run_url` | — | — | Actions run URL recorded in the tag message |
 | `sts_scope` | — | `odigos-io/ci-core` | Repo scope for the STS token |
 | `sts_identity` | — | `tag-releaser` | STS identity to request |
-
-The calling job must have `id-token: write` permission for the STS OIDC exchange, and the repo must be checked out with `persist-credentials: false`.
 
 ### Outputs (calculate phase only)
 
