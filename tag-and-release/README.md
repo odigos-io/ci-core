@@ -87,12 +87,37 @@ And the checkout step must set `persist-credentials: false` so that the STS toke
 
 ## Using as an action
 
-The `tag-and-release` action can be called directly from other workflows, just like the workflow example below. You could simply copy-paste it 
+The `tag-and-release` action can be called directly from other workflows. Copy-paste the example below and adjust `sts_scope` / `sts_identity` for your repo.
 
 ```yaml
+name: Tag and Release
+run-name: "Tag and Release · ${{ inputs.bump }} on ${{ inputs.base_branch }}"
+
+concurrency:
+  group: tag-and-release
+  cancel-in-progress: false
+
+permissions: read-all
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options: [patch, minor, major, pre-minor, pre-major, rc-minor, rc-major]
+      base_branch:
+        description: "Base branch to tag (e.g. main, releases/v1.9.x)"
+        required: true
+        default: main
+        type: string
+
 jobs:
   calculate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       new_version:    ${{ steps.calc.outputs.new_version }}
       create_branch:  ${{ steps.calc.outputs.create_branch }}
@@ -111,18 +136,23 @@ jobs:
           bump: ${{ inputs.bump }}
           base_branch: ${{ inputs.base_branch }}
 
+  # This job runs inside the "release-gate" environment.
+  # Configure that environment with required reviewers so GitHub pauses
+  # here and asks for manual approval before the tag job proceeds.
+  # Rejecting or dismissing cancels the workflow without creating any tag.
   confirm:
     needs: calculate
     runs-on: ubuntu-latest
     environment: release-gate
     steps:
-      - run: echo "Approved"
+      - name: Release approved
+        run: echo "Releasing ${{ needs.calculate.outputs.new_version }} from ${{ inputs.base_branch }}"
 
   tag:
     needs: [calculate, confirm]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      id-token: write  # required for STS OIDC token exchange
       contents: read
     steps:
       - uses: actions/checkout@v4
@@ -130,20 +160,20 @@ jobs:
           ref: ${{ inputs.base_branch }}
           fetch-depth: 0
           fetch-tags: true
-          persist-credentials: false
+          persist-credentials: false  # STS handles auth
 
       - uses: odigos-io/ci-core/tag-and-release@main
         with:
           operation: tag
           bump: ${{ inputs.bump }}
           base_branch: ${{ inputs.base_branch }}
+          sts_scope:    your-org/your-repo
+          sts_identity: your-identity
           new_version:    ${{ needs.calculate.outputs.new_version }}
           create_branch:  ${{ needs.calculate.outputs.create_branch }}
           release_branch: ${{ needs.calculate.outputs.release_branch }}
           actor:   ${{ github.actor }}
           run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          sts_scope:    your-org/your-repo
-          sts_identity: your-identity
 ```
 
 ### Inputs & Options
@@ -163,7 +193,7 @@ jobs:
 | `bump` | ✅ | — | Original bump type (recorded in tag message) |
 | `base_branch` | ✅ | — | Branch being tagged (recorded in tag message) |
 | `create_branch` | — | `false` | Whether to create a release branch |
-| `release_branch` | — | `""` | Release branch name (e.g. `releases/1.3.x`) |
+| `release_branch` | — | `""` | Release branch name (e.g. `releases/v1.3.x`) |
 | `actor` | — | — | GitHub actor recorded in the tag message |
 | `run_url` | — | — | Actions run URL recorded in the tag message |
 | `sts_scope` | — | `odigos-io/ci-core` | Repo scope for the STS token |
@@ -176,4 +206,4 @@ jobs:
 | `current_version` | Latest version tag reachable from HEAD |
 | `new_version` | Calculated next version |
 | `create_branch` | `"true"` if a release branch should be created |
-| `release_branch` | Release branch name (e.g. `releases/1.3.x`) |
+| `release_branch` | Release branch name (e.g. `releases/v1.3.x`) |
