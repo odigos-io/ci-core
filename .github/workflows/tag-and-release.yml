@@ -22,7 +22,7 @@ on:
         type: choice
         options: [patch, minor, major, pre-minor, pre-major, rc-minor, rc-major]
       base_branch:
-        description: "Base branch to tag (e.g. main, releases/1.9.x)"
+        description: "Base branch to tag (e.g. main, releases/v1.9.x)"
         required: true
         default: main
         type: string
