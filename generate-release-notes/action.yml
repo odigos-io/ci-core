@@ -80,7 +80,7 @@ runs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
 
       # This is temporary until https://github.com/kubernetes/release/pull/4272 is merged
       - name: Build release-notes tool
