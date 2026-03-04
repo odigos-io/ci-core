@@ -38,12 +38,12 @@ runs:
       env:
         TRIVY_VERSION: "0.69.3"
       run: |
-        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o trivy.tar.gz
+        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
         curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o trivy_checksums.txt
         grep "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt | sha256sum -c -
-        tar xzf trivy.tar.gz trivy
+        tar xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
         sudo mv trivy /usr/local/bin/trivy
-        rm trivy.tar.gz trivy_checksums.txt
+        rm "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt
 
     - name: Scan Image for Vulnerabilities
       if: ${{ inputs.image != '' && inputs.path == '' }}
