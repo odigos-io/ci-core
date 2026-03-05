@@ -21,7 +21,15 @@ Go to **Actions → Tag and Release → Run workflow** and fill in:
 | Input | Description | Example |
 |---|---|---|
 | `bump` | Version bump type | `minor` |
-| `base_branch` | Branch to tag | `main` or `releases/1.3.x` |
+| `base_branch` | Branch to tag | `main` or `releases/v1.3.x` |
+
+**Branch rules** (enforced at runtime):
+
+| Base branch | Allowed bump types |
+|---|---|
+| Default branch (e.g. `main`) | `minor`, `major`, `pre-minor`, `pre-major`, `rc-minor`, `rc-major` |
+| Release branch (`releases/vX.Y.x`) | `patch` only |
+| Any other branch | ❌ rejected |
 
 ### Version bump logic
 
@@ -87,7 +95,7 @@ And the checkout step must set `persist-credentials: false` so that the STS toke
 
 ## Using as an action
 
-The `tag-and-release` action can be called directly from other workflows. Copy-paste the example below and adjust `sts_scope` / `sts_identity` for your repo.
+The `tag-and-release` action can be called directly from other workflows. Copy-paste the example below and set `sts_identity` to the STS identity configured in your repo.
 
 ```yaml
 name: Tag and Release
@@ -167,7 +175,6 @@ jobs:
           operation: tag
           bump: ${{ inputs.bump }}
           base_branch: ${{ inputs.base_branch }}
-          sts_scope:    your-org/your-repo
           sts_identity: your-identity
           new_version:    ${{ needs.calculate.outputs.new_version }}
           create_branch:  ${{ needs.calculate.outputs.create_branch }}
@@ -182,8 +189,8 @@ jobs:
 
 | Input | Required | Description |
 |---|---|---|
-| `bump` | ✅ | Bump type |
-| `base_branch` | ✅ | Branch being tagged |
+| `bump` | ✅ | Bump type (see branch rules above) |
+| `base_branch` | ✅ | Branch being tagged (default branch or `releases/vX.Y.x`) |
 
 **`operation: tag`**
 
@@ -196,8 +203,7 @@ jobs:
 | `release_branch` | — | `""` | Release branch name (e.g. `releases/v1.3.x`) |
 | `actor` | — | — | GitHub actor recorded in the tag message |
 | `run_url` | — | — | Actions run URL recorded in the tag message |
-| `sts_scope` | — | `odigos-io/ci-core` | Repo scope for the STS token |
-| `sts_identity` | — | `tag-releaser` | STS identity to request |
+| `sts_identity` | — | `tag-releaser` | STS identity to request (scope is always `github.repository`) |
 
 ### Outputs (calculate phase only)
 
