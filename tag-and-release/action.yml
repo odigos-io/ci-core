@@ -149,6 +149,28 @@ runs:
         git config user.name  "ci-core[bot]"
         git config user.email "ci-core-bot@odigos.io"
 
+    - name: Verify HEAD matches base branch
+      if: ${{ inputs.operation == 'tag' }}
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        LOCAL_SHA=$(git rev-parse HEAD)
+        REMOTE_SHA=$(git rev-parse "origin/${BASE_BRANCH}")
+        if [[ "${LOCAL_SHA}" != "${REMOTE_SHA}" ]]; then
+          echo "::error::HEAD (${LOCAL_SHA}) does not match origin/${BASE_BRANCH} (${REMOTE_SHA}); aborting to avoid tagging the wrong commit"
+          exit 1
+        fi
+        # For release branches: the tagged commit must not be reachable from the
+        # default branch, otherwise the patch tag would effectively live on main too.
+        if [[ "${BASE_BRANCH}" =~ ^releases/v[0-9]+\.[0-9]+\.x$ ]]; then
+          if git merge-base --is-ancestor HEAD "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::HEAD is reachable from ${DEFAULT_BRANCH}; patch tags must be on commits exclusive to ${BASE_BRANCH} (has anything been committed to the release branch yet?)"
+            exit 1
+          fi
+        fi
+
     - name: Fail if tag already exists
       if: ${{ inputs.operation == 'tag' }}
       shell: bash
@@ -159,6 +181,25 @@ runs:
           echo "::error::Tag ${NEW_VERSION} already exists"; exit 1
         fi
 
+    # When a new release branch is needed, create it and push an empty "begin"
+    # commit BEFORE tagging. This guarantees the initial version tag lands on a
+    # commit that is exclusive to the release branch (not reachable from main),
+    # satisfying the same invariant that patch tags must hold.
+    - name: Create release branch with begin commit
+      if: ${{ inputs.operation == 'tag' && inputs.create_branch == 'true' }}
+      shell: bash
+      env:
+        RELEASE_BRANCH: ${{ inputs.release_branch }}
+        NEW_VERSION: ${{ inputs.new_version }}
+      run: |
+        if git ls-remote --exit-code --heads origin "${RELEASE_BRANCH}" >/dev/null 2>&1; then
+          echo "Branch ${RELEASE_BRANCH} already exists; skipping."
+        else
+          git checkout -b "${RELEASE_BRANCH}"
+          git commit --allow-empty -m "chore: begin ${RELEASE_BRANCH} (${NEW_VERSION})"
+          git push origin "${RELEASE_BRANCH}"
+        fi
+
     - name: Create & push tag
       if: ${{ inputs.operation == 'tag' }}
       shell: bash
@@ -166,14 +207,21 @@ runs:
         NEW_VERSION: ${{ inputs.new_version }}
         BUMP: ${{ inputs.bump }}
         BASE_BRANCH: ${{ inputs.base_branch }}
+        RELEASE_BRANCH: ${{ inputs.release_branch }}
+        CREATE_BRANCH: ${{ inputs.create_branch }}
         ACTOR: ${{ inputs.actor }}
         RUN_URL: ${{ inputs.run_url }}
       run: |
+        # Record the branch the tag actually lands on (release branch when newly created)
+        BRANCH_LABEL="${BASE_BRANCH}"
+        if [[ "${CREATE_BRANCH}" == "true" ]]; then
+          BRANCH_LABEL="${RELEASE_BRANCH}"
+        fi
         git tag -a "${NEW_VERSION}" -m "$(printf \
           'Release %s\n\nbump:    %s\nbranch:  %s\nactor:   %s\nrun:     %s' \
           "${NEW_VERSION}" \
           "${BUMP}" \
-          "${BASE_BRANCH}" \
+          "${BRANCH_LABEL}" \
           "${ACTOR}" \
           "${RUN_URL}")"
         git push origin "${NEW_VERSION}"
@@ -193,19 +241,6 @@ runs:
           --title "${NEW_VERSION}" \
           --generate-notes \
           $PRERELEASE_FLAG
-
-    - name: Create & push release branch
-      if: ${{ inputs.operation == 'tag' && inputs.create_branch == 'true' }}
-      shell: bash
-      env:
-        RELEASE_BRANCH: ${{ inputs.release_branch }}
-      run: |
-        if git ls-remote --exit-code --heads origin "${RELEASE_BRANCH}" >/dev/null 2>&1; then
-          echo "Branch ${RELEASE_BRANCH} already exists; skipping."
-        else
-          git checkout -b "${RELEASE_BRANCH}"
-          git push origin "${RELEASE_BRANCH}"
-        fi
 
     - name: Write release complete summary
       if: ${{ inputs.operation == 'tag' }}
