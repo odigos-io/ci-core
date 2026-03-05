@@ -29,29 +29,43 @@ runs:
         echo "Error: You must provide either 'image' or 'path' input."
         exit 1
 
+    # Install trivy directly from GitHub Releases with checksum verification.
+    # Avoids aquasecurity/trivy-action and aquasecurity/setup-trivy, both of which
+    # dynamically execute scripts from aquasecurity/trivy@main — unsafe after the
+    # aquasecurity org breach (March 2026).
+    - name: Install Trivy
+      shell: bash
+      env:
+        TRIVY_VERSION: "0.69.3"
+      run: |
+        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o trivy_checksums.txt
+        grep "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt | sha256sum -c -
+        tar xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+        sudo mv trivy /usr/local/bin/trivy
+        rm "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt
+
     - name: Scan Image for Vulnerabilities
       if: ${{ inputs.image != '' && inputs.path == '' }}
-      id: scan-image
-      uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518 # v0.34.1
-      with:
-        scan-type: 'image'
-        image-ref: ${{ inputs.image }}
-        format: 'json'
-        output: 'trivy-results.json'
-        ignore-unfixed: true
-        severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+      shell: bash
+      run: |
+        trivy image \
+          --format json \
+          --output trivy-results.json \
+          --ignore-unfixed \
+          --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+          ${{ inputs.image }}
 
     - name: Scan Path for Vulnerabilities
       if: ${{ inputs.path != '' && inputs.image == '' }}
-      id: scan-path
-      uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518 # v0.34.1
-      with:
-        scan-type: 'fs'
-        scan-ref: ${{ inputs.path }}
-        format: 'json'
-        output: 'trivy-results.json'
-        ignore-unfixed: true
-        severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+      shell: bash
+      run: |
+        trivy fs \
+          --format json \
+          --output trivy-results.json \
+          --ignore-unfixed \
+          --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+          ${{ inputs.path }}
 
     - name: Display in Summary
       if: always()
