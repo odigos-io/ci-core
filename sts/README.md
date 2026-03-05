@@ -1,68 +1,107 @@
+# sts
 
-This action retrieves short-lived Github credentials from using the Octopus STS service.
+Fetches short-lived GitHub credentials via the [octo-sts](https://octo-sts.dev) service and writes a gitconfig file covering all requested scopes.
 
-**Inputs:**
-- `scope` (required): The repository to which you want to gain access, in the format `owner/repo`.
-- `identity` (required): The name of the identity file created in the target repository (see below for details).
+---
 
-**Outputs:**
-- `GIT_CONFIG_PATH`: The path to a git config file that has been created to use the retrieved token for authentication for the specified scope.
+## Inputs
 
-**Usage:**
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `pairs` | — | `""` | Newline-separated `scope:identity` entries *(preferred)* |
+| `scope` | — | `""` | Single repo scope — backward-compatible alternative to `pairs` |
+| `identity` | — | `""` | Identity name — used together with `scope` |
+| `output-git-config` | — | `true` | Write a gitconfig file and include it globally |
+| `domain` | — | `octo-sts.dev` | octo-sts service domain |
 
-This action requires few setup steps in order to grant you a short-lived token for accessing a specific repository.
-1. First, you need to create an "identity(==file name)" in the *to-be-consumed(==private)* repository, which looks something like this:
+Exactly one of `pairs` **or** `scope`+`identity` must be provided. Passing both is an error.
+
+## Outputs
+
+| Output | Description |
+|---|---|
+| `GIT_CONFIG_PATH` | Path to the gitconfig file covering all scopes |
+| `GH_TOKEN` | The token for the last (or only) scope — for single-pair use |
+
+---
+
+## Setup
+
+### 1. Create an identity file in the target repo
+
 ```yaml
-# File name: .github/chainguard/NAME_OF_YOUR_IDENTITY.yaml
+# .github/chainguard/NAME_OF_YOUR_IDENTITY.sts.yaml
 issuer: https://token.actions.githubusercontent.com
-# this example subject allows for any repository under the odigos-io organization,
-# and allows for pull requests and branch/tag references.
 subject_pattern: '^repo:odigos-io/[-a-zA-Z0-9_]+:(pull_request|ref:.*)$'
 
 permissions:
   contents: read
 ```
-The above configuration will grant workflows running in any repository under the `odigos-io` organization the ability to request short-lived tokens with `read` access to the contents of the repository where this identity file is defined.
 
-2. In the consuming workflow, you need to make sure to provide `id-token: write` permission to the job that will use the action, like so:
+### 2. Grant `id-token: write` in the consuming job
+
 ```yaml
 jobs:
   example-job:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # this is required to request OIDC tokens
-    steps:
-    - name: Get GitHub STS Token
-      uses: odigos-io/ci-core/.github/sts
-      with:
-        scope: "odigos-io/TO_BE_CONSUMED_REPOSITORY"
-        identity: "NAME_OF_YOUR_IDENTITY"
+      id-token: write
 ```
-By running the above, your local git config will be updated to use the retrieved token for authentication for the specified scope(aka repository).
 
-**Usage with Docker 🐳:** By utilizing this action in the CI you can build docker images that need to pull private repositories as part of their build process without having to bake long-lived tokens or SSH keys into the image `#securityfirst`.
+---
 
-Since the action outputs a gitconfig file with the granted tokens which you could pass to down-the-line `docker build`s.
+## Usage
 
-In such a case, you can do something like this:
+### Single repo
+
 ```yaml
-    steps:
-    - name: Get GitHub STS Token
-      id: get-git-sts
-      uses: odigos-io/ci-core/.github/sts
-      with:
-        scope: "odigos-io/TO_BE_CONSUMED_REPOSITORY"
-        identity: "NAME_OF_YOUR_IDENTITY"
-
-    - name: Build Docker Image
-      run: |
-        docker build --secret id=GIT_CONFIG_PATH,src=${{ steps.get-git-sts.outputs.GIT_CONFIG_PATH }} .
+- uses: odigos-io/ci-core/sts@main
+  with:
+    pairs: "odigos-io/my-private-repo:my-identity"
 ```
-and in your `Dockerfile`, you can use the secret like so:
+
+Or using the legacy inputs (backward-compatible):
+
+```yaml
+- uses: odigos-io/ci-core/sts@main
+  with:
+    scope: "odigos-io/my-private-repo"
+    identity: "my-identity"
+```
+
+### Multiple repos
+
+```yaml
+- uses: odigos-io/ci-core/sts@main
+  with:
+    pairs: |
+      odigos-io/repo-a:identity-a
+      odigos-io/repo-b:identity-b
+```
+
+A single gitconfig is written covering all scopes. If the same scope appears more than once, the duplicate is skipped with a warning. If any token exchange fails, the step fails immediately.
+
+---
+
+## Usage with Docker
+
+Pass the gitconfig as a build secret so private Go/npm modules are accessible without baking tokens into the image.
+
+```yaml
+- id: sts
+  uses: odigos-io/ci-core/sts@main
+  with:
+    pairs: "odigos-io/my-private-repo:my-identity"
+
+- name: Build Docker image
+  run: |
+    docker build \
+      --secret id=gitconfig,src=${{ steps.sts.outputs.GIT_CONFIG_PATH }} \
+      .
+```
+
 ```Dockerfile
-...
 RUN --mount=type=secret,id=gitconfig,required=false \
-    git config --global include.path /run/secrets/gitconfig; \
+    git config --global include.path /run/secrets/gitconfig && \
     go mod download
-...
 ```
