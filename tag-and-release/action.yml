@@ -23,7 +23,11 @@ inputs:
     description: "Bump type: patch | minor | major | pre-minor | pre-major | rc-minor | rc-major"
     required: false
   base_branch:
-    description: "The branch being tagged (e.g. main or releases/1.3.x)"
+    description: |
+      The branch being tagged. Allowed values:
+        default branch (e.g. main)  → any bump except patch
+        release branch (releases/vX.Y.x) → patch only
+      Any other value is rejected.
     required: false
 
   # ── tag inputs ──────────────────────────────────────────────────────────────
@@ -44,10 +48,6 @@ inputs:
   run_url:
     description: "URL of the triggering Actions run — recorded in the tag message"
     required: false
-  sts_scope:
-    description: "GitHub repo scope for the STS token"
-    required: false
-    default: ""
   sts_identity:
     description: "STS identity to request"
     required: false
@@ -72,6 +72,29 @@ runs:
   steps:
 
     # ── CALCULATE PHASE ────────────────────────────────────────────────────────
+
+    - name: Validate branch and bump combination
+      if: ${{ inputs.operation == 'calculate' }}
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        BUMP: ${{ inputs.bump }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        if [[ "${BASE_BRANCH}" == "${DEFAULT_BRANCH}" ]]; then
+          if [[ "${BUMP}" == "patch" ]]; then
+            echo "::error::patch is not allowed on the default branch (${DEFAULT_BRANCH}); use a release branch (releases/vX.Y.x)"
+            exit 1
+          fi
+        elif [[ "${BASE_BRANCH}" =~ ^releases/v[0-9]+\.[0-9]+\.x$ ]]; then
+          if [[ "${BUMP}" != "patch" ]]; then
+            echo "::error::only 'patch' is allowed on release branches; got '${BUMP}' on ${BASE_BRANCH}"
+            exit 1
+          fi
+        else
+          echo "::error::tagging is only allowed from the default branch (${DEFAULT_BRANCH}) or a release branch (releases/vX.Y.x); got: ${BASE_BRANCH}"
+          exit 1
+        fi
 
     - name: Calculate new version
       id: calc
@@ -116,7 +139,7 @@ runs:
       if: ${{ inputs.operation == 'tag' }}
       uses: odigos-io/ci-core/sts@main
       with:
-        scope: ${{ inputs.sts_scope }}
+        scope: ${{ github.repository }}
         identity: ${{ inputs.sts_identity }}
 
     - name: Configure git identity

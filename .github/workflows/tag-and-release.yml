@@ -82,7 +82,6 @@ jobs:
           operation: tag
           bump: ${{ inputs.bump }}
           base_branch: ${{ inputs.base_branch }}
-          sts_scope: odigos-io/ci-core
           sts_identity: tag-releaser
           new_version: ${{ needs.calculate.outputs.new_version }}
           create_branch: ${{ needs.calculate.outputs.create_branch }}
