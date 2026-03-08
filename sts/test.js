@@ -341,6 +341,20 @@ test('OUTPUT_GIT_CONFIG=true single pair → gitconfig contains token and scope'
   assert.match(cfg, /odigos-io\/my-repo/);
 });
 
+test('successive run() calls accumulate gitconfig entries (multi-step scenario)', async () => {
+  process.env.OUTPUT_GIT_CONFIG = 'true';
+
+  process.env.PAIRS = 'odigos-io/repo-a:ro';
+  await run({ fetchFn: mockFetch(...happyTriple('ghp_A')), execFileSync: noopExec, env: process.env });
+
+  process.env.PAIRS = 'odigos-io/repo-b:ro';
+  await run({ fetchFn: mockFetch(...happyTriple('ghp_B')), execFileSync: noopExec, env: process.env });
+
+  const cfg = fs.readFileSync('/tmp/odigos.gitconfig', 'utf8');
+  assert.match(cfg, /repo-a/);
+  assert.match(cfg, /repo-b/);
+});
+
 test('OUTPUT_GIT_CONFIG=false → git exec not called, no GIT_CONFIG_PATH output', async () => {
   process.env.PAIRS             = 'odigos-io/my-repo:my-identity';
   process.env.OUTPUT_GIT_CONFIG = 'false';
