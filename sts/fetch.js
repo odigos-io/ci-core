@@ -37,7 +37,6 @@ async function run({
     : `${legacyScope}:${legacyIdentity}`;
 
   // ── process pairs ──────────────────────────────────────────────────────────
-  if (outputGitConfig) fs.writeFileSync(gitConfigFile, '');
 
   const seen      = new Set();
   let   lastToken = '';
