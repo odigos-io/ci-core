@@ -23,7 +23,7 @@ async function run({
 
   // ── resolve input mode ─────────────────────────────────────────────────────
   const hasPairs  = rawPairs.length > 0;
-  const hasLegacy = legacyScope.length > 0 || legacyIdentity.length > 0;
+  const hasLegacy = legacyScope.length > 0 && legacyIdentity.length > 0;
 
   if (hasPairs && hasLegacy) {
     throw new Error('provide either "pairs" or "scope"/"identity", not both');
@@ -55,11 +55,12 @@ async function run({
       throw new Error(`invalid pair '${line}' — expected 'scope:identity'`);
     }
 
-    if (seen.has(scope)) {
-      process.stdout.write(`::warning::duplicate scope '${scope}' — skipping\n`);
+    const dedupKey = `${scope}:${identity}`;
+    if (seen.has(dedupKey)) {
+      process.stdout.write(`::warning::duplicate pair '${scope}:${identity}' — skipping\n`);
       continue;
     }
-    seen.add(scope);
+    seen.add(dedupKey);
 
     console.log(`[ + ] scope=${scope}  identity=${identity}`);
 
