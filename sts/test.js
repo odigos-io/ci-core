@@ -186,13 +186,25 @@ test('multi-pair → GH_TOKEN is the last token, gitconfig has both entries', as
 // Deduplication
 // ---------------------------------------------------------------------------
 
-test('duplicate scope → second entry is skipped, first token wins', async () => {
-  process.env.PAIRS = 'odigos-io/repo-a:id-a\nodigos-io/repo-a:id-duplicate';
+test('exact duplicate pair → second entry is skipped, first token wins', async () => {
+  process.env.PAIRS = 'odigos-io/repo-a:id-a\nodigos-io/repo-a:id-a';
 
   // Only one set of three fetches should be made
   await run({ fetchFn: mockFetch(...happyTriple('ghp_first')), execFileSync: noopExec, env: process.env });
 
   assert.equal(readOutput().GH_TOKEN, 'ghp_first');
+});
+
+test('same scope different identity → both tokens are fetched, last wins', async () => {
+  process.env.PAIRS = 'odigos-io/repo-a:id-a\nodigos-io/repo-a:id-b';
+
+  await run({
+    fetchFn:      mockFetch(...happyTriple('ghp_A'), ...happyTriple('ghp_B')),
+    execFileSync: noopExec,
+    env:          process.env,
+  });
+
+  assert.equal(readOutput().GH_TOKEN, 'ghp_B');
 });
 
 // ---------------------------------------------------------------------------
@@ -275,4 +287,100 @@ test('second pair fails → rejects (fail-fast)', async () => {
     }),
     /OIDC fetch failed/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// OIDC edge cases
+// ---------------------------------------------------------------------------
+
+test('OIDC response missing value field → rejects with empty OIDC token', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+
+  await assert.rejects(
+    () => run({
+      fetchFn: mockFetch({ body: {} }),   // ok:true but no `value`
+      execFileSync: noopExec,
+      env: process.env,
+    }),
+    /empty OIDC token/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// gitconfig output
+// ---------------------------------------------------------------------------
+
+test('OUTPUT_GIT_CONFIG=true → GIT_CONFIG_PATH written to GITHUB_OUTPUT', async () => {
+  process.env.PAIRS             = 'odigos-io/my-repo:my-identity';
+  process.env.OUTPUT_GIT_CONFIG = 'true';
+
+  const execCalls = [];
+  await run({
+    fetchFn:      mockFetch(...happyTriple('ghp_cfg')),
+    execFileSync: (...args) => execCalls.push(args),
+    env:          process.env,
+  });
+
+  const out = readOutput();
+  assert.equal(out.GH_TOKEN,       'ghp_cfg');
+  assert.equal(out.GIT_CONFIG_PATH, '/tmp/odigos.gitconfig');
+});
+
+test('OUTPUT_GIT_CONFIG=true single pair → gitconfig contains token and scope', async () => {
+  process.env.PAIRS             = 'odigos-io/my-repo:my-identity';
+  process.env.OUTPUT_GIT_CONFIG = 'true';
+
+  await run({
+    fetchFn:      mockFetch(...happyTriple('ghp_single')),
+    execFileSync: noopExec,
+    env:          process.env,
+  });
+
+  const cfg = fs.readFileSync('/tmp/odigos.gitconfig', 'utf8');
+  assert.match(cfg, /ghp_single/);
+  assert.match(cfg, /odigos-io\/my-repo/);
+});
+
+test('OUTPUT_GIT_CONFIG=false → git exec not called, no GIT_CONFIG_PATH output', async () => {
+  process.env.PAIRS             = 'odigos-io/my-repo:my-identity';
+  process.env.OUTPUT_GIT_CONFIG = 'false';
+
+  const execCalls = [];
+  await run({
+    fetchFn:      mockFetch(...happyTriple('ghp_noconfig')),
+    execFileSync: (...args) => execCalls.push(args),
+    env:          process.env,
+  });
+
+  assert.equal(execCalls.length, 0);
+  assert.equal(readOutput().GIT_CONFIG_PATH, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Custom domain
+// ---------------------------------------------------------------------------
+
+test('custom DOMAIN → used in OIDC audience and STS exchange URL', async () => {
+  process.env.PAIRS   = 'odigos-io/my-repo:my-identity';
+  process.env.DOMAIN  = 'custom-sts.example.com';
+
+  const capturedUrls = [];
+  const capturingFetch = async (url, opts) => {
+    capturedUrls.push(url);
+    const defaults = happyTriple('ghp_custom');
+    const r = defaults[capturedUrls.length - 1];
+    return {
+      ok:   r.ok   ?? true,
+      status: r.status ?? 200,
+      json: async () => r.body,
+      text: async () => r.text ?? JSON.stringify(r.body ?? {}),
+    };
+  };
+
+  await run({ fetchFn: capturingFetch, execFileSync: noopExec, env: process.env });
+
+  // OIDC audience should include custom domain
+  assert.match(capturedUrls[0], /custom-sts\.example\.com/);
+  // STS exchange URL should use custom domain
+  assert.match(capturedUrls[1], /custom-sts\.example\.com/);
 });

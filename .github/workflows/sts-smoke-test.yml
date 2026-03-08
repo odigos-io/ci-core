@@ -1,0 +1,72 @@
+name: STS Smoke Test
+
+on:
+  pull_request:
+    paths:
+      - 'sts/**'
+      - '.github/chainguard/ro.sts.yaml'
+
+permissions:
+  id-token: write   # required to mint the OIDC token for STS exchange
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run STS unit tests
+        run: npm test
+        working-directory: sts
+
+  smoke-test:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch STS token (ro role)
+        id: sts
+        uses: ./sts
+        with:
+          identity: ro
+
+      - name: Verify token can read this repo
+        env:
+          GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN }}
+        run: |
+          gh api /repos/${{ github.repository }} --jq '.full_name'
+
+  smoke-test-multi:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch STS tokens via pairs input (ro + sts-test-role)
+        id: sts
+        uses: ./sts
+        with:
+          pairs: |
+            ${{ github.repository }}:ro
+            ${{ github.repository }}:sts-test-role
+          output-git-config: 'true'
+
+      - name: Verify both tokens were fetched and gitconfig is written
+        env:
+          GIT_CONFIG_PATH: ${{ steps.sts.outputs.GIT_CONFIG_PATH }}
+        run: |
+          [[ -f "$GIT_CONFIG_PATH" ]] || { echo "::error::GIT_CONFIG_PATH not found"; exit 1; }
+
+          # Extract both tokens from the gitconfig (format: https://x:TOKEN@github.com/...)
+          mapfile -t tokens < <(grep -oP '(?<=https://x:)[^@]+' "$GIT_CONFIG_PATH")
+          [[ "${#tokens[@]}" -eq 2 ]] || { echo "::error::expected 2 tokens in gitconfig, got ${#tokens[@]}"; exit 1; }
+
+          for token in "${tokens[@]}"; do
+            result=$(curl -sf -H "Authorization: Bearer $token" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ github.repository }} | jq -r '.full_name')
+            [[ "$result" == "${{ github.repository }}" ]] || { echo "::error::token check failed: got '$result'"; exit 1; }
+            echo "ok: $result"
+          done
