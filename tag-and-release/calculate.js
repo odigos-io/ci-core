@@ -9,7 +9,7 @@
 // The repo must already be checked out with full history and tags
 // (fetch-depth: 0, fetch-tags: true) before this script runs.
 //
-// Version bump logic (based on the latest tag reachable from BASE_BRANCH):
+// Version bump logic (based on the latest stable tag visible repo-wide):
 //
 //   major      v1.2.3        → v2.0.0         + creates releases/v2.0.x branch
 //   major      v2.0.0-pre.N  → v2.0.0           (promotes pre to stable; branch already exists)
@@ -97,12 +97,22 @@ function cmpVersions(a, b) {
   return pa.preNum - pb.preNum;
 }
 
-function getMergedTags({ stableOnly = false } = {}) {
+function getMergedTags() {
   const raw = git("git tag --merged HEAD --list 'v[0-9]*'");
   if (!raw) return [];
-  let tags = raw.split('\n').filter((t) => parseVersion(t) !== null);
-  if (stableOnly) tags = tags.filter((t) => /^v\d+\.\d+\.\d+$/.test(t));
-  return tags.sort(cmpVersions);
+  return raw.split('\n').filter((t) => parseVersion(t) !== null).sort(cmpVersions);
+}
+
+// Repo-wide stable tags — not scoped to HEAD lineage. Used to determine the
+// current stable version base so that initial version tags on release-branch
+// "begin" commits (unreachable from main) are still visible during major/minor
+// bump calculations on main.
+function getAllStableTags() {
+  const raw = git("git tag --list 'v[0-9]*'");
+  if (!raw) return [];
+  return raw.split('\n')
+    .filter((t) => /^v\d+\.\d+\.\d+$/.test(t) && parseVersion(t) !== null)
+    .sort(cmpVersions);
 }
 
 function latest(tags) {
@@ -128,13 +138,14 @@ function latestPreFor(maj, min, type = null) {
 
 // ── Determine the "current" version used for display and parsing ──────────────
 
+// allMerged: tags reachable from HEAD — used for branch-scoped pre-release
+// continuation (latestPreFor) to avoid picking up pre-releases from other series.
 const allMerged = getMergedTags();
-const stableMerged = getMergedTags({ stableOnly: true });
+// stableMerged: ALL stable tags repo-wide — used as the version base so that
+// initial stable tags on release-branch "begin" commits (unreachable from main)
+// are still visible when calculating the next major/minor on main.
+const stableMerged = getAllStableTags();
 
-// Always use the latest stable tag as the calculation base.
-// Pre-release lookups for each bump type use allMerged filtered by the target series,
-// which avoids cross-series contamination when multiple pre-release series are visible
-// from HEAD (common in CI-infra repos where all tags share the same commit).
 const currentTag = latest(stableMerged) ?? 'v0.0.0';
 const cv = parseVersion(currentTag);
 if (!cv) fail(`Failed to parse current version tag: ${currentTag}`);
