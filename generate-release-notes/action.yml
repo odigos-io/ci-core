@@ -23,6 +23,8 @@ runs:
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Fetch main and release branches
         shell: bash
