@@ -40,33 +40,12 @@
 // A release branch (releases/vX.Y.x) is created for major, minor, rc-minor,
 // rc-major, and the first pre-minor/pre-major. Skipped if it already exists.
 
-const { execSync } = require('child_process');
+const { execSync: defaultExecSync } = require('child_process');
 const fs = require('fs');
 
-const BUMP = process.env.BUMP;
-const BASE_BRANCH = process.env.BASE_BRANCH;
-const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT;
-
-if (!BUMP) fail('BUMP environment variable is required');
-if (!BASE_BRANCH) fail('BASE_BRANCH environment variable is required');
-
-function fail(msg) {
-  console.error(`::error::${msg}`);
-  process.exit(1);
-}
-
-function git(cmd) {
-  return execSync(cmd, { encoding: 'utf8' }).trim();
-}
-
-function tagExists(tag) {
-  try {
-    execSync(`git rev-parse ${JSON.stringify(tag)}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// ---------------------------------------------------------------------------
+// Pure helpers (no I/O)
+// ---------------------------------------------------------------------------
 
 const VERSION_RE = /^v(\d+)\.(\d+)\.(\d+)(?:-(pre|rc)\.(\d+))?$/;
 
@@ -74,11 +53,11 @@ function parseVersion(tag) {
   const m = VERSION_RE.exec(tag);
   if (!m) return null;
   return {
-    major: parseInt(m[1], 10),
-    minor: parseInt(m[2], 10),
-    patch: parseInt(m[3], 10),
+    major:   parseInt(m[1], 10),
+    minor:   parseInt(m[2], 10),
+    patch:   parseInt(m[3], 10),
     preType: m[4] ?? '',
-    preNum: m[5] !== undefined ? parseInt(m[5], 10) : -1,
+    preNum:  m[5] !== undefined ? parseInt(m[5], 10) : -1,
   };
 }
 
@@ -97,24 +76,6 @@ function cmpVersions(a, b) {
   return pa.preNum - pb.preNum;
 }
 
-function getMergedTags() {
-  const raw = git("git tag --merged HEAD --list 'v[0-9]*'");
-  if (!raw) return [];
-  return raw.split('\n').filter((t) => parseVersion(t) !== null).sort(cmpVersions);
-}
-
-// Repo-wide stable tags — not scoped to HEAD lineage. Used to determine the
-// current stable version base so that initial version tags on release-branch
-// "begin" commits (unreachable from main) are still visible during major/minor
-// bump calculations on main.
-function getAllStableTags() {
-  const raw = git("git tag --list 'v[0-9]*'");
-  if (!raw) return [];
-  return raw.split('\n')
-    .filter((t) => /^v\d+\.\d+\.\d+$/.test(t) && parseVersion(t) !== null)
-    .sort(cmpVersions);
-}
-
 function latest(tags) {
   return tags.length ? tags[tags.length - 1] : null;
 }
@@ -126,180 +87,238 @@ function parseBranchSeries(branch) {
   return { major: parseInt(m[1], 10), minor: parseInt(m[2], 10) };
 }
 
-// Returns the latest pre-release tag for the given major.minor.0 coordinate.
-// type: 'pre' | 'rc' | null (null matches any pre-release)
-function latestPreFor(maj, min, type = null) {
-  return latest(allMerged.filter((t) => {
-    const v = parseVersion(t);
-    return v && v.major === maj && v.minor === min && v.patch === 0
-      && (type ? v.preType === type : v.preType);
-  }));
-}
+// ---------------------------------------------------------------------------
+// calculate() — injectable for testing
+// ---------------------------------------------------------------------------
 
-// ── Determine the "current" version used for display and parsing ──────────────
+function calculate({ execSync = defaultExecSync, env = process.env } = {}) {
+  const BUMP         = env.BUMP;
+  const BASE_BRANCH  = env.BASE_BRANCH;
+  const GITHUB_OUTPUT = env.GITHUB_OUTPUT || '';
 
-// allMerged: tags reachable from HEAD — used for branch-scoped pre-release
-// continuation (latestPreFor) to avoid picking up pre-releases from other series.
-const allMerged = getMergedTags();
-// stableMerged: ALL stable tags repo-wide — used as the version base so that
-// initial stable tags on release-branch "begin" commits (unreachable from main)
-// are still visible when calculating the next major/minor on main.
-const stableMerged = getAllStableTags();
+  if (!BUMP)        throw new Error('BUMP environment variable is required');
+  if (!BASE_BRANCH) throw new Error('BASE_BRANCH environment variable is required');
 
-const currentTag = latest(stableMerged) ?? 'v0.0.0';
-const cv = parseVersion(currentTag);
-if (!cv) fail(`Failed to parse current version tag: ${currentTag}`);
-
-const { major, minor, patch, preType, preNum } = cv;
-
-// ── Calculate new version ─────────────────────────────────────────────────────
-
-let displayCurrent = currentTag;
-let newVersion;
-let createBranch = false;
-let releaseBranch = '';
-
-switch (BUMP) {
-  case 'major': {
-    const tMaj = major + 1;
-    newVersion = `v${tMaj}.0.0`;
-    releaseBranch = `releases/v${tMaj}.0.x`;
-    const existingPre = latestPreFor(tMaj, 0);
-    if (existingPre) { displayCurrent = existingPre; }
-    else { createBranch = true; }
-    break;
+  function git(cmd) {
+    return execSync(cmd, { encoding: 'utf8' }).trim();
   }
 
-  case 'minor': {
-    const tMin = minor + 1;
-    newVersion = `v${major}.${tMin}.0`;
-    releaseBranch = `releases/v${major}.${tMin}.x`;
-    const existingPre = latestPreFor(major, tMin);
-    if (existingPre) { displayCurrent = existingPre; }
-    else { createBranch = true; }
-    break;
+  function tagExists(tag) {
+    try {
+      execSync(`git rev-parse ${JSON.stringify(tag)}`, { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  case 'patch': {
-    if (BASE_BRANCH.startsWith('releases/')) {
-      // On a release branch: scope tags to this branch's major.minor series to
-      // avoid picking up pre-releases from unrelated series visible from HEAD.
-      const series = parseBranchSeries(BASE_BRANCH);
-      const scopedTags = series
-        ? allMerged.filter((t) => {
-            const v = parseVersion(t);
-            return v && v.major === series.major && v.minor === series.minor;
-          })
-        : allMerged;
-      const latestAny = latest(scopedTags) ?? 'v0.0.0';
-      const lav = parseVersion(latestAny);
-      if (!lav.preType) {
-        // Latest is already stable — normal patch increment
-        newVersion = `v${major}.${minor}.${patch + 1}`;
-      } else {
-        const baseVer = `v${lav.major}.${lav.minor}.${lav.patch}`;
-        if (tagExists(baseVer)) {
-          // Stable base already exists globally (maybe tagged on a sibling
-          // branch line) — show it as current and increment from it
-          displayCurrent = baseVer;
-          newVersion = `v${lav.major}.${lav.minor}.${lav.patch + 1}`;
+  function getMergedTags() {
+    const raw = git("git tag --merged HEAD --list 'v[0-9]*'");
+    if (!raw) return [];
+    return raw.split('\n').filter((t) => parseVersion(t) !== null).sort(cmpVersions);
+  }
+
+  // Repo-wide stable tags — not scoped to HEAD lineage. Used to determine the
+  // current stable version base so that initial version tags on release-branch
+  // "begin" commits (unreachable from main) are still visible during major/minor
+  // bump calculations on main.
+  function getAllStableTags() {
+    const raw = git("git tag --list 'v[0-9]*'");
+    if (!raw) return [];
+    return raw.split('\n')
+      .filter((t) => /^v\d+\.\d+\.\d+$/.test(t) && parseVersion(t) !== null)
+      .sort(cmpVersions);
+  }
+
+  // Returns the latest pre-release tag for the given major.minor.0 coordinate.
+  // type: 'pre' | 'rc' | null (null matches any pre-release)
+  // Uses repo-wide tag lookup (not --merged HEAD) so that pre-release tags on
+  // release-branch "begin" commits (unreachable from main) are still visible
+  // when bumping pre-major/pre-minor/rc-* a second time from the default branch.
+  function latestPreFor(maj, min, type = null) {
+    const raw = git(`git tag --list 'v${maj}.${min}.0-*'`);
+    if (!raw) return null;
+    const tags = raw.split('\n')
+      .filter((t) => {
+        const v = parseVersion(t);
+        return v && v.major === maj && v.minor === min && v.patch === 0
+          && (type ? v.preType === type : v.preType);
+      })
+      .sort(cmpVersions);
+    return latest(tags);
+  }
+
+  // allMerged: tags reachable from HEAD — used for branch-scoped patch logic.
+  const allMerged    = getMergedTags();
+  // stableMerged: ALL stable tags repo-wide — used as the version base.
+  const stableMerged = getAllStableTags();
+
+  const currentTag = latest(stableMerged) ?? 'v0.0.0';
+  const cv = parseVersion(currentTag);
+  if (!cv) throw new Error(`Failed to parse current version tag: ${currentTag}`);
+
+  const { major, minor, patch } = cv;
+
+  let displayCurrent = currentTag;
+  let newVersion;
+  let createBranch = false;
+  let releaseBranch = '';
+
+  switch (BUMP) {
+    case 'major': {
+      const tMaj = major + 1;
+      newVersion = `v${tMaj}.0.0`;
+      releaseBranch = `releases/v${tMaj}.0.x`;
+      const existingPre = latestPreFor(tMaj, 0);
+      if (existingPre) { displayCurrent = existingPre; }
+      else { createBranch = true; }
+      break;
+    }
+
+    case 'minor': {
+      const tMin = minor + 1;
+      newVersion = `v${major}.${tMin}.0`;
+      releaseBranch = `releases/v${major}.${tMin}.x`;
+      const existingPre = latestPreFor(major, tMin);
+      if (existingPre) { displayCurrent = existingPre; }
+      else { createBranch = true; }
+      break;
+    }
+
+    case 'patch': {
+      if (BASE_BRANCH.startsWith('releases/')) {
+        // On a release branch: scope tags to this branch's major.minor series to
+        // avoid picking up pre-releases from unrelated series visible from HEAD.
+        const series = parseBranchSeries(BASE_BRANCH);
+        const scopedTags = series
+          ? allMerged.filter((t) => {
+              const v = parseVersion(t);
+              return v && v.major === series.major && v.minor === series.minor;
+            })
+          : allMerged;
+        const latestAny = latest(scopedTags) ?? 'v0.0.0';
+        const lav = parseVersion(latestAny);
+        if (!lav.preType) {
+          // Latest is already stable — normal patch increment
+          newVersion = `v${major}.${minor}.${patch + 1}`;
         } else {
-          displayCurrent = latestAny;
-          // Stable base not yet released — promote pre/rc to stable
-          newVersion = baseVer;
+          const baseVer = `v${lav.major}.${lav.minor}.${lav.patch}`;
+          if (tagExists(baseVer)) {
+            // Stable base already exists globally — increment from it
+            displayCurrent = baseVer;
+            newVersion = `v${lav.major}.${lav.minor}.${lav.patch + 1}`;
+          } else {
+            displayCurrent = latestAny;
+            // Stable base not yet released — promote pre/rc to stable
+            newVersion = baseVer;
+          }
         }
+      } else {
+        // Not a release branch (e.g. main): always use stable tags only
+        newVersion = `v${major}.${minor}.${patch + 1}`;
       }
-    } else {
-      // Not a release branch (e.g. main): always use stable tags only
-      newVersion = `v${major}.${minor}.${patch + 1}`;
+      break;
     }
-    break;
+
+    case 'pre-minor': {
+      // On a release branch, target that branch's series (e.g. releases/2.0.x → v2.0).
+      // On main, target the next minor from the latest stable.
+      const bs = parseBranchSeries(BASE_BRANCH);
+      const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
+      releaseBranch = `releases/v${tMaj}.${tMin}.x`;
+      const rc  = latestPreFor(tMaj, tMin, 'rc');
+      if (rc) throw new Error(`'pre-minor' cannot follow an rc (${rc}).`);
+      const pre = latestPreFor(tMaj, tMin, 'pre');
+      if (pre) {
+        newVersion = `v${tMaj}.${tMin}.0-pre.${parseVersion(pre).preNum + 1}`;
+        displayCurrent = pre;
+      } else {
+        newVersion = `v${tMaj}.${tMin}.0-pre.0`;
+        createBranch = true;
+      }
+      break;
+    }
+
+    case 'rc-minor': {
+      const bs = parseBranchSeries(BASE_BRANCH);
+      const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
+      releaseBranch = `releases/v${tMaj}.${tMin}.x`;
+      const rc  = latestPreFor(tMaj, tMin, 'rc');
+      const pre = latestPreFor(tMaj, tMin, 'pre');
+      if (rc) {
+        newVersion = `v${tMaj}.${tMin}.0-rc.${parseVersion(rc).preNum + 1}`;
+        displayCurrent = rc;
+      } else {
+        newVersion = `v${tMaj}.${tMin}.0-rc.0`;
+        if (pre) { displayCurrent = pre; }
+        else { createBranch = true; }
+      }
+      break;
+    }
+
+    case 'pre-major': {
+      const tMaj = major + 1;
+      releaseBranch = `releases/v${tMaj}.0.x`;
+      const rc  = latestPreFor(tMaj, 0, 'rc');
+      if (rc) throw new Error(`'pre-major' cannot follow an rc (${rc}).`);
+      const pre = latestPreFor(tMaj, 0, 'pre');
+      if (pre) {
+        newVersion = `v${tMaj}.0.0-pre.${parseVersion(pre).preNum + 1}`;
+        displayCurrent = pre;
+      } else {
+        newVersion = `v${tMaj}.0.0-pre.0`;
+        createBranch = true;
+      }
+      break;
+    }
+
+    case 'rc-major': {
+      const tMaj = major + 1;
+      releaseBranch = `releases/v${tMaj}.0.x`;
+      const rc  = latestPreFor(tMaj, 0, 'rc');
+      const pre = latestPreFor(tMaj, 0, 'pre');
+      if (rc) {
+        newVersion = `v${tMaj}.0.0-rc.${parseVersion(rc).preNum + 1}`;
+        displayCurrent = rc;
+      } else {
+        newVersion = `v${tMaj}.0.0-rc.0`;
+        if (pre) { displayCurrent = pre; }
+        else { createBranch = true; }
+      }
+      break;
+    }
+
+    default:
+      throw new Error(`Unknown bump type: ${BUMP}`);
   }
 
-  case 'pre-minor': {
-    // On a release branch, target that branch's series (e.g. releases/2.0.x → v2.0).
-    // On main, target the next minor from the latest stable.
-    const bs = parseBranchSeries(BASE_BRANCH);
-    const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
-    releaseBranch = `releases/v${tMaj}.${tMin}.x`;
-    const rc  = latestPreFor(tMaj, tMin, 'rc');
-    if (rc) fail(`'pre-minor' cannot follow an rc (${rc}).`);
-    const pre = latestPreFor(tMaj, tMin, 'pre');
-    if (pre) {
-      newVersion = `v${tMaj}.${tMin}.0-pre.${parseVersion(pre).preNum + 1}`;
-      displayCurrent = pre;
-    } else {
-      newVersion = `v${tMaj}.${tMin}.0-pre.0`;
-      createBranch = true;
-    }
-    break;
+  const result = { currentVersion: displayCurrent, newVersion, createBranch, releaseBranch };
+
+  if (GITHUB_OUTPUT) {
+    const outputs = [
+      `current_version=${displayCurrent}`,
+      `new_version=${newVersion}`,
+      `create_branch=${createBranch}`,
+      `release_branch=${releaseBranch}`,
+    ].join('\n');
+    fs.appendFileSync(GITHUB_OUTPUT, outputs + '\n');
   }
 
-  case 'rc-minor': {
-    const bs = parseBranchSeries(BASE_BRANCH);
-    const [tMaj, tMin] = bs ? [bs.major, bs.minor] : [major, minor + 1];
-    releaseBranch = `releases/v${tMaj}.${tMin}.x`;
-    const rc  = latestPreFor(tMaj, tMin, 'rc');
-    const pre = latestPreFor(tMaj, tMin, 'pre');
-    if (rc) {
-      newVersion = `v${tMaj}.${tMin}.0-rc.${parseVersion(rc).preNum + 1}`;
-      displayCurrent = rc;
-    } else {
-      newVersion = `v${tMaj}.${tMin}.0-rc.0`;
-      if (pre) { displayCurrent = pre; }
-      else { createBranch = true; }
-    }
-    break;
-  }
-
-  case 'pre-major': {
-    const tMaj = major + 1;
-    releaseBranch = `releases/v${tMaj}.0.x`;
-    const rc  = latestPreFor(tMaj, 0, 'rc');
-    if (rc) fail(`'pre-major' cannot follow an rc (${rc}).`);
-    const pre = latestPreFor(tMaj, 0, 'pre');
-    if (pre) {
-      newVersion = `v${tMaj}.0.0-pre.${parseVersion(pre).preNum + 1}`;
-      displayCurrent = pre;
-    } else {
-      newVersion = `v${tMaj}.0.0-pre.0`;
-      createBranch = true;
-    }
-    break;
-  }
-
-  case 'rc-major': {
-    const tMaj = major + 1;
-    releaseBranch = `releases/v${tMaj}.0.x`;
-    const rc  = latestPreFor(tMaj, 0, 'rc');
-    const pre = latestPreFor(tMaj, 0, 'pre');
-    if (rc) {
-      newVersion = `v${tMaj}.0.0-rc.${parseVersion(rc).preNum + 1}`;
-      displayCurrent = rc;
-    } else {
-      newVersion = `v${tMaj}.0.0-rc.0`;
-      if (pre) { displayCurrent = pre; }
-      else { createBranch = true; }
-    }
-    break;
-  }
-
-  default:
-    fail(`Unknown bump type: ${BUMP}`);
+  return result;
 }
 
-// ── Emit outputs ──────────────────────────────────────────────────────────────
-
-const outputs = [
-  `current_version=${displayCurrent}`,
-  `new_version=${newVersion}`,
-  `create_branch=${createBranch}`,
-  `release_branch=${releaseBranch}`,
-].join('\n');
-
-if (GITHUB_OUTPUT) {
-  fs.appendFileSync(GITHUB_OUTPUT, outputs + '\n');
+// ---------------------------------------------------------------------------
+// Entry point when executed directly by the action
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  try {
+    const { currentVersion, newVersion, createBranch, releaseBranch } = calculate();
+    console.log(`current: ${currentVersion}  →  new: ${newVersion}`);
+    if (createBranch) console.log(`branch:  ${releaseBranch} (will be created)`);
+  } catch (e) {
+    console.error(`::error::${e.message}`);
+    process.exit(1);
+  }
 }
 
-console.log(`current: ${displayCurrent}  →  new: ${newVersion}`);
-if (createBranch) console.log(`branch:  ${releaseBranch} (will be created)`);
+module.exports = { calculate };
