@@ -28,8 +28,12 @@ Go to **Actions → Tag and Release → Run workflow** and fill in:
 | Base branch | Allowed bump types |
 |---|---|
 | Default branch (e.g. `main`) | `minor`, `major`, `pre-minor`, `pre-major`, `rc-minor`, `rc-major` |
-| Release branch (`releases/vX.Y.x`) | `patch` only |
+| Release branch (`releases/vX.Y.x`) | all except `patch`-from-main restriction |
 | Any other branch | ❌ rejected |
+
+> `patch` is the only bump type blocked on the default branch.
+> All bump types are valid on a release branch — including `minor`/`major`
+> for final promotion so the stable tag lands on the same commit as the last RC.
 
 ### Version bump logic
 
@@ -63,7 +67,7 @@ No tags → treated as `v0.0.0` baseline for all bump types.
 
 ### Starting a pre-release
 
-Run the workflow from **`main`** with the appropriate bump type.
+The **first** run of a pre-release series must come from **`main`** — this is what creates the `releases/vX.Y.x` branch.
 
 | Goal | Bump | Base branch |
 |---|---|---|
@@ -72,32 +76,29 @@ Run the workflow from **`main`** with the appropriate bump type.
 | Start an rc-major (skipping pre) | `rc-major` | `main` |
 | Start an rc-minor (skipping pre) | `rc-minor` | `main` |
 
-A `releases/vX.Y.x` branch is created automatically on the first run.
+A `releases/vX.Y.x` branch is created automatically.
 
 ---
 
 ### Incrementing a pre (pre on pre)
 
-Already have `v2.0.0-pre.0` and need `v2.0.0-pre.1`?
-Run again from **`main`** with the **same bump type** (`pre-major` or `pre-minor`).
-The action finds the existing pre tag repo-wide and increments it.
+All subsequent pre iterations run from the **release branch**, so the tag lands on a release-branch commit (not on main).
 
 | Goal | Bump | Base branch |
 |---|---|---|
-| `v2.0.0-pre.0` → `v2.0.0-pre.1` | `pre-major` | `main` |
-| `v1.3.0-pre.0` → `v1.3.0-pre.1` | `pre-minor` | `main` |
+| `v2.0.0-pre.0` → `v2.0.0-pre.1` | `pre-major` | `releases/v2.0.x` |
+| `v1.3.0-pre.0` → `v1.3.0-pre.1` | `pre-minor` | `releases/v1.3.x` |
 
 ---
 
 ### Promoting pre → rc (rc on pre)
 
-Ready to move from pre to release candidate?
-Run from **`main`** with `rc-major` or `rc-minor`. The action sees the existing pre tag and resets the rc counter to 0.
+Ready to move from pre to release candidate? Run from the **release branch**.
 
 | Goal | Bump | Base branch |
 |---|---|---|
-| `v2.0.0-pre.N` → `v2.0.0-rc.0` | `rc-major` | `main` |
-| `v1.3.0-pre.N` → `v1.3.0-rc.0` | `rc-minor` | `main` |
+| `v2.0.0-pre.N` → `v2.0.0-rc.0` | `rc-major` | `releases/v2.0.x` |
+| `v1.3.0-pre.N` → `v1.3.0-rc.0` | `rc-minor` | `releases/v1.3.x` |
 
 > **Note:** `pre-major` / `pre-minor` cannot follow an `rc` — that would be going backwards.
 
@@ -105,24 +106,24 @@ Run from **`main`** with `rc-major` or `rc-minor`. The action sees the existing 
 
 ### Incrementing an rc (rc on rc)
 
-Need another rc iteration?
-Run from **`main`** with the same `rc-*` bump type.
+Run from the **release branch**.
 
 | Goal | Bump | Base branch |
 |---|---|---|
-| `v2.0.0-rc.0` → `v2.0.0-rc.1` | `rc-major` | `main` |
-| `v1.3.0-rc.0` → `v1.3.0-rc.1` | `rc-minor` | `main` |
+| `v2.0.0-rc.0` → `v2.0.0-rc.1` | `rc-major` | `releases/v2.0.x` |
+| `v1.3.0-rc.0` → `v1.3.0-rc.1` | `rc-minor` | `releases/v1.3.x` |
 
 ---
 
 ### Promoting pre/rc → stable
 
-Run from **`main`** with `major` or `minor`. The action detects the existing pre/rc and produces the stable version directly (no new branch created).
+Run from the **release branch** with `major` or `minor`. The stable tag
+lands on the same commit as the last RC — not on main.
 
 | Goal | Bump | Base branch |
 |---|---|---|
-| `v2.0.0-pre.N` or `v2.0.0-rc.N` → `v2.0.0` | `major` | `main` |
-| `v1.3.0-pre.N` or `v1.3.0-rc.N` → `v1.3.0` | `minor` | `main` |
+| `v2.0.0-pre.N` or `v2.0.0-rc.N` → `v2.0.0` | `major` | `releases/v2.0.x` |
+| `v1.3.0-pre.N` or `v1.3.0-rc.N` → `v1.3.0` | `minor` | `releases/v1.3.x` |
 
 Patch releases from the release branch continue as normal after promotion.
 

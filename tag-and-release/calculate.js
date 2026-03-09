@@ -257,7 +257,10 @@ function calculate({ execSync = defaultExecSync, env = process.env } = {}) {
     }
 
     case 'pre-major': {
-      const tMaj = major + 1;
+      // On a release branch (e.g. releases/v2.0.x), target that branch's series.
+      // On main, target the next major from the latest stable.
+      const bs = parseBranchSeries(BASE_BRANCH);
+      const tMaj = bs ? bs.major : major + 1;
       releaseBranch = `releases/v${tMaj}.0.x`;
       const rc  = latestPreFor(tMaj, 0, 'rc');
       if (rc) throw new Error(`'pre-major' cannot follow an rc (${rc}).`);
@@ -273,7 +276,10 @@ function calculate({ execSync = defaultExecSync, env = process.env } = {}) {
     }
 
     case 'rc-major': {
-      const tMaj = major + 1;
+      // On a release branch (e.g. releases/v2.0.x), target that branch's series.
+      // On main, target the next major from the latest stable.
+      const bs = parseBranchSeries(BASE_BRANCH);
+      const tMaj = bs ? bs.major : major + 1;
       releaseBranch = `releases/v${tMaj}.0.x`;
       const rc  = latestPreFor(tMaj, 0, 'rc');
       const pre = latestPreFor(tMaj, 0, 'pre');

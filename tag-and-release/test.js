@@ -287,6 +287,99 @@ test('patch on release branch (rc only, no stable base) → promotes rc to stabl
 });
 
 // ---------------------------------------------------------------------------
+// pre-major / rc-major from release branch (second+ iteration)
+// ---------------------------------------------------------------------------
+
+test('pre on pre (major) from release branch → increments pre number', () => {
+  // Running pre-major from releases/v2.0.x — pre.0 is on the release branch begin commit
+  const allTags    = ['v1.2.3', 'v2.0.0-pre.0'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-pre.0'];  // reachable from releases/v2.0.x HEAD
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'pre-major', BASE_BRANCH: 'releases/v2.0.x' },
+  });
+  assert.equal(r.newVersion,    'v2.0.0-pre.1');
+  assert.equal(r.currentVersion, 'v2.0.0-pre.0');
+  assert.equal(r.createBranch, false);
+});
+
+test('rc on pre (major) from release branch → promotes to rc.0', () => {
+  const allTags    = ['v1.2.3', 'v2.0.0-pre.1'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-pre.1'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'rc-major', BASE_BRANCH: 'releases/v2.0.x' },
+  });
+  assert.equal(r.newVersion,    'v2.0.0-rc.0');
+  assert.equal(r.currentVersion, 'v2.0.0-pre.1');
+  assert.equal(r.createBranch, false);
+});
+
+test('rc on rc (major) from release branch → increments rc number', () => {
+  const allTags    = ['v1.2.3', 'v2.0.0-pre.0', 'v2.0.0-rc.0'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-pre.0', 'v2.0.0-rc.0'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'rc-major', BASE_BRANCH: 'releases/v2.0.x' },
+  });
+  assert.equal(r.newVersion,    'v2.0.0-rc.1');
+  assert.equal(r.currentVersion, 'v2.0.0-rc.0');
+  assert.equal(r.createBranch, false);
+});
+
+test('pre-major after rc from release branch → error (cannot go back)', () => {
+  const allTags    = ['v1.2.3', 'v2.0.0-rc.0'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-rc.0'];
+  assert.throws(
+    () => calculate({
+      execSync: makeExecSync(allTags, mergedTags),
+      env: { BUMP: 'pre-major', BASE_BRANCH: 'releases/v2.0.x' },
+    }),
+    /cannot follow an rc/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Promoting to stable from release branch (tag lands on release branch HEAD)
+// ---------------------------------------------------------------------------
+
+test('major from release branch with existing pre → v2.0.0, no new branch', () => {
+  const allTags    = ['v1.2.3', 'v2.0.0-pre.2'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-pre.2'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'major', BASE_BRANCH: 'releases/v2.0.x' },
+  });
+  assert.equal(r.newVersion,    'v2.0.0');
+  assert.equal(r.currentVersion, 'v2.0.0-pre.2');
+  assert.equal(r.createBranch, false);
+});
+
+test('major from release branch with existing rc → v2.0.0, no new branch', () => {
+  const allTags    = ['v1.2.3', 'v2.0.0-pre.0', 'v2.0.0-rc.2'];
+  const mergedTags = ['v1.2.3', 'v2.0.0-pre.0', 'v2.0.0-rc.2'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'major', BASE_BRANCH: 'releases/v2.0.x' },
+  });
+  assert.equal(r.newVersion,    'v2.0.0');
+  assert.equal(r.currentVersion, 'v2.0.0-rc.2');
+  assert.equal(r.createBranch, false);
+});
+
+test('minor from release branch with existing rc → v1.3.0, no new branch', () => {
+  const allTags    = ['v1.2.3', 'v1.3.0-pre.0', 'v1.3.0-rc.1'];
+  const mergedTags = ['v1.2.3', 'v1.3.0-pre.0', 'v1.3.0-rc.1'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'minor', BASE_BRANCH: 'releases/v1.3.x' },
+  });
+  assert.equal(r.newVersion,    'v1.3.0');
+  assert.equal(r.currentVersion, 'v1.3.0-rc.1');
+  assert.equal(r.createBranch, false);
+});
+
+// ---------------------------------------------------------------------------
 // No tags → v0.0.0 baseline
 // ---------------------------------------------------------------------------
 

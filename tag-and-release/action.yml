@@ -87,10 +87,11 @@ runs:
             exit 1
           fi
         elif [[ "${BASE_BRANCH}" =~ ^releases/v[0-9]+\.[0-9]+\.x$ ]]; then
-          if [[ "${BUMP}" != "patch" ]]; then
-            echo "::error::only 'patch' is allowed on release branches; got '${BUMP}' on ${BASE_BRANCH}"
-            exit 1
-          fi
+          # All bump types except patch-on-main are allowed on release branches.
+          # patch: normal patch increment or pre/rc → stable promotion
+          # pre-*/rc-*: iterate pre-release on the branch
+          # minor/major: promote the series to stable (tag lands here, not main)
+          : # no restriction
         else
           echo "::error::tagging is only allowed from the default branch (${DEFAULT_BRANCH}) or a release branch (releases/vX.Y.x); got: ${BASE_BRANCH}"
           exit 1
