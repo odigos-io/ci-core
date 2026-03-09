@@ -12,7 +12,7 @@ inputs:
     description: "GitHub token"
     required: true
   dry-run:
-    description: "If true, only generate and print release notes; do not upload artifact or update the GitHub release"
+    description: "If true, generate and upload release notes as usual (so other steps can use the artifact) but skip updating the GitHub release body with gh release edit"
     required: false
     default: "false"
 
@@ -163,17 +163,16 @@ runs:
           cat release-notes.md
           echo '```'
 
-      - name: Dry run (skipping upload and release update)
-        if: inputs.dry-run == 'true'
-        shell: bash
-        run: echo "Dry run enabled — artifact upload and gh release edit were skipped."
-
       - name: Upload release notes
-        if: inputs.dry-run != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-notes
           path: release-notes.md
+
+      - name: Dry run (skipping release update)
+        if: inputs.dry-run == 'true'
+        shell: bash
+        run: echo "Dry run enabled — gh release edit was skipped; artifact was still uploaded for downstream steps."
 
       - name: Update GitHub release body
         if: inputs.dry-run != 'true'
