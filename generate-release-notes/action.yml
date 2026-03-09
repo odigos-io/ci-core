@@ -1,5 +1,8 @@
 name: Generate Release Notes
-description: Generates release notes for a release
+description: |
+  Generates release notes for a release. Authenticate with either an STS identity
+  (recommended; requires id-token: write in the calling job) or a github-token
+  for backward compatibility.
 
 inputs:
   tag:
@@ -9,22 +12,43 @@ inputs:
     description: "Release branch"
     required: true
   github-token:
-    description: "GitHub token"
-    required: true
+    description: "GitHub token (required if sts_identity is not set; used for checkout, API, and gh release edit)"
+    required: false
+  sts_identity:
+    description: "STS identity for short-lived tokens (scope is github.repository). When set, use this instead of github-token; calling job must have id-token: write."
+    required: false
+    default: ""
   dry-run:
-    description: "If true, only generate and print release notes; do not upload artifact or update the GitHub release"
+    description: "If true, generate and upload release notes as usual (so other steps can use the artifact) but skip updating the GitHub release body with gh release edit"
     required: false
     default: "false"
 
 runs:
   using: composite
   steps:
+      - name: Validate token input
+        shell: bash
+        run: |
+          if [ -z "${{ inputs.sts_identity }}" ] && [ -z "${{ inputs.github-token }}" ]; then
+            echo "::error::Either sts_identity or github-token must be set."
+            exit 1
+          fi
+
+      - name: Get STS token
+        id: sts
+        if: inputs.sts_identity != ''
+        uses: odigos-io/ci-core/sts@main
+        with:
+          scope: ${{ github.repository }}
+          identity: ${{ inputs.sts_identity }}
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
           fetch-tags: true
+          token: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
 
       - name: Fetch main and release branches
         shell: bash
@@ -142,7 +166,7 @@ runs:
       - name: Generate release notes
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ inputs.github-token }}
+          GITHUB_TOKEN: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
         run: |
           ${{ env.RELEASE_NOTES_BIN }} \
             --org='odigos-io' \
@@ -163,22 +187,29 @@ runs:
           cat release-notes.md
           echo '```'
 
-      - name: Dry run (skipping upload and release update)
-        if: inputs.dry-run == 'true'
-        shell: bash
-        run: echo "Dry run enabled — artifact upload and gh release edit were skipped."
-
       - name: Upload release notes
-        if: inputs.dry-run != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-notes
           path: release-notes.md
 
+      - name: Dry run (skipping release update)
+        if: inputs.dry-run == 'true'
+        shell: bash
+        run: echo "Dry run enabled — gh release edit was skipped; artifact was still uploaded for downstream steps."
+
       - name: Update GitHub release body
         if: inputs.dry-run != 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ inputs.github-token }}
+          GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
         run: |
-          gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
+          MAX=124000
+          NOTES=$(cat release-notes.md)
+          if [ "${#NOTES}" -gt "$MAX" ]; then
+            echo "${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see the release-notes.md asset on this release for the full content._' > release-notes-gh.md
+            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes-gh.md
+            gh release upload "${{ inputs.tag }}" release-notes.md --repo "${{ github.repository }}" --clobber
+          else
+            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
+          fi
