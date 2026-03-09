@@ -22,7 +22,10 @@ on:
         type: choice
         options: [patch, minor, major, pre-minor, pre-major, rc-minor, rc-major]
       base_branch:
-        description: "Base branch to tag (e.g. main, releases/v1.9.x)"
+        description: >
+          Base branch to tag. Use 'main' for the default branch.
+          For release branches, shorthand is accepted:
+          '1.3.x', 'v1.3.x', and 'releases/v1.3.x' are all equivalent.
         required: true
         default: main
         type: string
@@ -36,11 +39,25 @@ jobs:
       new_version: ${{ steps.calc.outputs.new_version }}
       create_branch: ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
+      base_branch: ${{ steps.normalize.outputs.base_branch }}
     steps:
+
+      - name: Normalize base_branch
+        id: normalize
+        shell: bash
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+        run: |
+          b="${BASE_BRANCH}"
+          b="${b#releases/}"
+          if [[ "$b" =~ ^v?[0-9]+\.[0-9]+\.x$ ]]; then
+            b="releases/v${b#v}"
+          fi
+          echo "base_branch=${b}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base_branch }}
+          ref: ${{ steps.normalize.outputs.base_branch }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -72,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base_branch }}
+          ref: ${{ needs.calculate.outputs.base_branch }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false # STS handles auth
@@ -81,7 +98,7 @@ jobs:
         with:
           operation: tag
           bump: ${{ inputs.bump }}
-          base_branch: ${{ inputs.base_branch }}
+          base_branch: ${{ needs.calculate.outputs.base_branch }}
           sts_identity: tag-releaser
           new_version: ${{ needs.calculate.outputs.new_version }}
           create_branch: ${{ needs.calculate.outputs.create_branch }}

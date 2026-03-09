@@ -21,7 +21,7 @@ Go to **Actions → Tag and Release → Run workflow** and fill in:
 | Input | Description | Example |
 |---|---|---|
 | `bump` | Version bump type | `minor` |
-| `base_branch` | Branch to tag | `main` or `releases/v1.3.x` |
+| `base_branch` | Branch to tag | `main`, `releases/v1.3.x`, or shorthand `1.3.x` |
 
 **Branch rules** (enforced at runtime):
 
@@ -186,7 +186,10 @@ on:
         type: choice
         options: [patch, minor, major, pre-minor, pre-major, rc-minor, rc-major]
       base_branch:
-        description: "Base branch to tag (e.g. main, releases/v1.9.x)"
+        description: >
+          Base branch to tag. Use 'main' for the default branch.
+          For release branches, shorthand is accepted:
+          '1.3.x', 'v1.3.x', and 'releases/v1.3.x' are all equivalent.
         required: true
         default: main
         type: string
