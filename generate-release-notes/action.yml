@@ -180,4 +180,12 @@ runs:
         env:
           GH_TOKEN: ${{ inputs.github-token }}
         run: |
-          gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
+          MAX=124000
+          NOTES=$(cat release-notes.md)
+          if [ "${#NOTES}" -gt "$MAX" ]; then
+            echo "${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see the release-notes.md asset on this release for the full content._' > release-notes-gh.md
+            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes-gh.md
+            gh release upload "${{ inputs.tag }}" release-notes.md --repo "${{ github.repository }}" --clobber
+          else
+            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
+          fi
