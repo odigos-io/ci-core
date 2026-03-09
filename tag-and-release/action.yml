@@ -237,9 +237,19 @@ runs:
         if [[ "${NEW_VERSION}" == *"-pre."* || "${NEW_VERSION}" == *"-rc."* ]]; then
           PRERELEASE_FLAG="--prerelease"
         fi
+
+        NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+          -f tag_name="${NEW_VERSION}" \
+          --jq '.body')
+
+        MAX=124000
+        if [ "${#NOTES}" -gt "$MAX" ]; then
+          NOTES="${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see full git history for details._'
+        fi
+
         gh release create "${NEW_VERSION}" \
           --title "${NEW_VERSION}" \
-          --generate-notes \
+          --notes "$NOTES" \
           $PRERELEASE_FLAG
 
     - name: Write release complete summary
