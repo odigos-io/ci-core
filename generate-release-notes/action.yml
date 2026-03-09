@@ -6,7 +6,7 @@ description: |
 
 inputs:
   tag:
-    description: "Tag of the release"
+    description: "Tag of the release."
     required: true
   release-branch:
     description: "Release branch"
@@ -22,6 +22,15 @@ inputs:
     description: "If true, generate and upload release notes as usual (so other steps can use the artifact) but skip updating the GitHub release body with gh release edit"
     required: false
     default: "false"
+  use-branch-head:
+    description: "If true, checkout the release branch and use its HEAD as end_sha (for tags not published yet); skip updating the GitHub release body"
+    required: false
+    default: "false"
+
+outputs:
+  release_notes:
+    description: "Generated release notes (full content of release-notes.md)"
+    value: ${{ steps.notes.outputs.release_notes }}
 
 runs:
   using: composite
@@ -45,7 +54,7 @@ runs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.use-branch-head == 'true' && inputs.release-branch || inputs.tag }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
@@ -179,6 +188,32 @@ runs:
             --end-sha=${{ steps.shas.outputs.end_sha }} \
             --output=release-notes.md
 
+      - name: Set release notes output
+        id: notes
+        shell: bash
+        run: |
+          # GitHub multiline output format is name<<DELIMITER, content, DELIMITER.
+          # Use a random delimiter so the notes content cannot accidentally contain it
+          # and end the value early.
+          DELIM="release_notes_eof_$(openssl rand -hex 8)"
+          echo "release_notes<<${DELIM}" >> $GITHUB_OUTPUT
+          cat release-notes.md >> $GITHUB_OUTPUT
+          echo "${DELIM}" >> $GITHUB_OUTPUT
+
+      - name: Truncate release notes for GitHub
+        id: truncate
+        shell: bash
+        run: |
+          MAX=124000
+          NOTES=$(cat release-notes.md)
+          if [ "${#NOTES}" -gt "$MAX" ]; then
+            echo "${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see the release-notes.md asset on this release for the full content._' > release-notes-gh.md
+            echo "truncated=true" >> $GITHUB_OUTPUT
+          else
+            cp release-notes.md release-notes-gh.md
+            echo "truncated=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Print release notes
         shell: bash
         run: |
@@ -191,7 +226,9 @@ runs:
         uses: actions/upload-artifact@v4
         with:
           name: release-notes
-          path: release-notes.md
+          path: |
+            release-notes.md
+            release-notes-gh.md
 
       - name: Dry run (skipping release update)
         if: inputs.dry-run == 'true'
@@ -199,17 +236,12 @@ runs:
         run: echo "Dry run enabled — gh release edit was skipped; artifact was still uploaded for downstream steps."
 
       - name: Update GitHub release body
-        if: inputs.dry-run != 'true'
+        if: inputs.dry-run != 'true' && inputs.use-branch-head != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
         run: |
-          MAX=124000
-          NOTES=$(cat release-notes.md)
-          if [ "${#NOTES}" -gt "$MAX" ]; then
-            echo "${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see the release-notes.md asset on this release for the full content._' > release-notes-gh.md
-            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes-gh.md
+          gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes-gh.md
+          if [ "${{ steps.truncate.outputs.truncated }}" == "true" ]; then
             gh release upload "${{ inputs.tag }}" release-notes.md --repo "${{ github.repository }}" --clobber
-          else
-            gh release edit "${{ inputs.tag }}" --repo "${{ github.repository }}" --notes-file release-notes.md
           fi

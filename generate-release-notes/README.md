@@ -84,10 +84,19 @@ jobs:
 | `github-token` | If not using STS | — | Token for checkout, API, and `gh release edit`. Use `${{ secrets.GITHUB_TOKEN }}` or a PAT with `contents: write`. |
 | `sts_identity` | If not using github-token | `""` | STS identity for short-lived tokens (scope is `github.repository`). Calling job must have `id-token: write`. See [../sts/README.md](../sts/README.md). |
 | `dry-run` | No | `"false"` | If `"true"`, notes are still generated and the `release-notes` artifact is uploaded, but the GitHub release body is **not** updated. Use for previews or when downstream steps consume the artifact. |
+| `use-branch-head` | No | `"false"` | If `"true"`, the action checks out the release branch and uses its HEAD as the end of the commit range (for tags not published yet). The GitHub release body is not updated in this case. |
 
 ### Outputs and artifacts
 
-- **Workflow artifact:** The step always uploads a `release-notes` artifact containing the full `release-notes.md`, so other jobs can download it.
+**Action output**
+
+| Output | Description |
+|--------|-------------|
+| `release_notes` | Full content of the generated release notes (same as `release-notes.md`). Use `steps.<id>.outputs.release_notes` in the same job. |
+
+**Workflow artifacts and release**
+
+- **Workflow artifact:** The action always uploads a `release-notes` artifact containing the full `release-notes.md`, so other jobs can download it.
 - **Release body:** Unless `dry-run` is `true`, the action updates the GitHub release for `tag` with the generated notes.
 - **Truncation:** If the notes exceed GitHub’s limit (~124k chars), the release body is truncated and a note is appended. The **full** `release-notes.md` is still in the artifact and is also attached to the release as a `release-notes.md` asset when truncated.
 
