@@ -2,9 +2,11 @@
 
 Composite action that generates release notes for a given tag, uploads them as a workflow artifact, and optionally updates the GitHub release body. Uses a custom release-note regex to collect `release-note` blocks from the commit range.
 
+Authentication can use **STS** (short-lived tokens via [octo-sts](https://octo-sts.dev); see [../sts/README.md](../sts/README.md)) or a **GitHub token** for backward compatibility. Exactly one of `sts_identity` or `github-token` must be provided.
+
 ## Usage
 
-### Basic example
+### Basic example (GitHub token)
 
 ```yaml
 - uses: odigos-io/ci-core/generate-release-notes@main
@@ -12,6 +14,26 @@ Composite action that generates release notes for a given tag, uploads them as a
     tag: v1.19.1
     release-branch: main
     github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### Basic example (STS)
+
+The calling job must have `id-token: write` for the STS OIDC exchange. An identity file must exist in the repo (e.g. `.github/chainguard/release-notes.sts.yaml`) granting `contents: read` and `contents: write` as needed.
+
+```yaml
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  update-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: odigos-io/ci-core/generate-release-notes@main
+        with:
+          tag: v1.19.1
+          release-branch: main
+          sts_identity: release-notes
 ```
 
 ### Full example (workflow_dispatch)
@@ -59,7 +81,8 @@ jobs:
 |-------|----------|---------|-------------|
 | `tag` | Yes | — | Tag of the release (e.g. `v1.19.1`, `v1.17.0-rc1`). Must be an exact semver tag: `vX.Y.Z` or `vX.Y.Z-rcN`. |
 | `release-branch` | Yes | — | Branch used as scope for the release-notes tool (e.g. `main`). |
-| `github-token` | Yes | — | Token for API access. Use `${{ secrets.GITHUB_TOKEN }}` or a PAT with `contents: write` if updating the release. |
+| `github-token` | If not using STS | — | Token for checkout, API, and `gh release edit`. Use `${{ secrets.GITHUB_TOKEN }}` or a PAT with `contents: write`. |
+| `sts_identity` | If not using github-token | `""` | STS identity for short-lived tokens (scope is `github.repository`). Calling job must have `id-token: write`. See [../sts/README.md](../sts/README.md). |
 | `dry-run` | No | `"false"` | If `"true"`, notes are still generated and the `release-notes` artifact is uploaded, but the GitHub release body is **not** updated. Use for previews or when downstream steps consume the artifact. |
 
 ### Outputs and artifacts
