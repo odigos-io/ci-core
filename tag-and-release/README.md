@@ -59,6 +59,75 @@ No tags → treated as `v0.0.0` baseline for all bump types.
 
 ---
 
+## Pre-release playbook
+
+### Starting a pre-release
+
+Run the workflow from **`main`** with the appropriate bump type.
+
+| Goal | Bump | Base branch |
+|---|---|---|
+| Start a pre-major | `pre-major` | `main` |
+| Start a pre-minor | `pre-minor` | `main` |
+| Start an rc-major (skipping pre) | `rc-major` | `main` |
+| Start an rc-minor (skipping pre) | `rc-minor` | `main` |
+
+A `releases/vX.Y.x` branch is created automatically on the first run.
+
+---
+
+### Incrementing a pre (pre on pre)
+
+Already have `v2.0.0-pre.0` and need `v2.0.0-pre.1`?
+Run again from **`main`** with the **same bump type** (`pre-major` or `pre-minor`).
+The action finds the existing pre tag repo-wide and increments it.
+
+| Goal | Bump | Base branch |
+|---|---|---|
+| `v2.0.0-pre.0` → `v2.0.0-pre.1` | `pre-major` | `main` |
+| `v1.3.0-pre.0` → `v1.3.0-pre.1` | `pre-minor` | `main` |
+
+---
+
+### Promoting pre → rc (rc on pre)
+
+Ready to move from pre to release candidate?
+Run from **`main`** with `rc-major` or `rc-minor`. The action sees the existing pre tag and resets the rc counter to 0.
+
+| Goal | Bump | Base branch |
+|---|---|---|
+| `v2.0.0-pre.N` → `v2.0.0-rc.0` | `rc-major` | `main` |
+| `v1.3.0-pre.N` → `v1.3.0-rc.0` | `rc-minor` | `main` |
+
+> **Note:** `pre-major` / `pre-minor` cannot follow an `rc` — that would be going backwards.
+
+---
+
+### Incrementing an rc (rc on rc)
+
+Need another rc iteration?
+Run from **`main`** with the same `rc-*` bump type.
+
+| Goal | Bump | Base branch |
+|---|---|---|
+| `v2.0.0-rc.0` → `v2.0.0-rc.1` | `rc-major` | `main` |
+| `v1.3.0-rc.0` → `v1.3.0-rc.1` | `rc-minor` | `main` |
+
+---
+
+### Promoting pre/rc → stable
+
+Run from **`main`** with `major` or `minor`. The action detects the existing pre/rc and produces the stable version directly (no new branch created).
+
+| Goal | Bump | Base branch |
+|---|---|---|
+| `v2.0.0-pre.N` or `v2.0.0-rc.N` → `v2.0.0` | `major` | `main` |
+| `v1.3.0-pre.N` or `v1.3.0-rc.N` → `v1.3.0` | `minor` | `main` |
+
+Patch releases from the release branch continue as normal after promotion.
+
+---
+
 ## What you need
 
 ### 1. `release-gate` environment
