@@ -24,10 +24,13 @@ inputs:
     required: false
   base_branch:
     description: |
-      The branch being tagged. Allowed values:
-        default branch (e.g. main)  → any bump except patch
-        release branch (releases/vX.Y.x) → patch only
-      Any other value is rejected.
+      The branch being tagged.
+      Release branches can be written in short form — all of the
+      following are equivalent:
+        releases/v1.3.x   (canonical)
+        v1.3.x
+        1.3.x             (shortest)
+      Default branch (e.g. main) must be given as-is.
     required: false
 
   # ── tag inputs ──────────────────────────────────────────────────────────────
@@ -71,13 +74,31 @@ runs:
   using: composite
   steps:
 
+    # ── NORMALIZE base_branch input ────────────────────────────────────────────
+    # Accepts shorthand: "1.3.x" or "v1.3.x" → "releases/v1.3.x"
+
+    - name: Normalize base_branch
+      id: normalize
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ inputs.base_branch }}
+      run: |
+        b="${BASE_BRANCH}"
+        # Strip "releases/" prefix if present
+        b="${b#releases/}"
+        # If it now looks like N.N.x (with or without leading v), normalise
+        if [[ "$b" =~ ^v?[0-9]+\.[0-9]+\.x$ ]]; then
+          b="releases/v${b#v}"
+        fi
+        echo "base_branch=${b}" >> "$GITHUB_OUTPUT"
+
     # ── CALCULATE PHASE ────────────────────────────────────────────────────────
 
     - name: Validate branch and bump combination
       if: ${{ inputs.operation == 'calculate' }}
       shell: bash
       env:
-        BASE_BRANCH: ${{ inputs.base_branch }}
+        BASE_BRANCH: ${{ steps.normalize.outputs.base_branch }}
         BUMP: ${{ inputs.bump }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
@@ -87,13 +108,16 @@ runs:
             exit 1
           fi
         elif [[ "${BASE_BRANCH}" =~ ^releases/v[0-9]+\.[0-9]+\.x$ ]]; then
-          # All bump types except patch-on-main are allowed on release branches.
-          # patch: normal patch increment or pre/rc → stable promotion
-          # pre-*/rc-*: iterate pre-release on the branch
-          # minor/major: promote the series to stable (tag lands here, not main)
-          : # no restriction
+          # The release branch must already exist. To start a new pre-release
+          # series (which creates the branch), run from the default branch.
+          if ! git ls-remote --exit-code --heads origin "${BASE_BRANCH}" \
+               >/dev/null 2>&1; then
+            echo "::error::release branch '${BASE_BRANCH}' does not exist;" \
+                 "to start a new pre-release series, run from ${DEFAULT_BRANCH}"
+            exit 1
+          fi
         else
-          echo "::error::tagging is only allowed from the default branch (${DEFAULT_BRANCH}) or a release branch (releases/vX.Y.x); got: ${BASE_BRANCH}"
+          echo "::error::invalid base_branch '${BASE_BRANCH}': must be the default branch (${DEFAULT_BRANCH}) or a release branch (releases/vX.Y.x, vX.Y.x, or X.Y.x)"
           exit 1
         fi
 
@@ -103,14 +127,14 @@ runs:
       shell: bash
       env:
         BUMP: ${{ inputs.bump }}
-        BASE_BRANCH: ${{ inputs.base_branch }}
+        BASE_BRANCH: ${{ steps.normalize.outputs.base_branch }}
       run: node "${{ github.action_path }}/calculate.js"
 
     - name: Write release preview summary
       if: ${{ inputs.operation == 'calculate' }}
       shell: bash
       env:
-        BASE_BRANCH: ${{ inputs.base_branch }}
+        BASE_BRANCH: ${{ steps.normalize.outputs.base_branch }}
         BUMP: ${{ inputs.bump }}
         CURRENT_VERSION: ${{ steps.calc.outputs.current_version }}
         NEW_VERSION: ${{ steps.calc.outputs.new_version }}
@@ -154,7 +178,7 @@ runs:
       if: ${{ inputs.operation == 'tag' }}
       shell: bash
       env:
-        BASE_BRANCH: ${{ inputs.base_branch }}
+        BASE_BRANCH: ${{ steps.normalize.outputs.base_branch }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         LOCAL_SHA=$(git rev-parse HEAD)
@@ -207,7 +231,7 @@ runs:
       env:
         NEW_VERSION: ${{ inputs.new_version }}
         BUMP: ${{ inputs.bump }}
-        BASE_BRANCH: ${{ inputs.base_branch }}
+        BASE_BRANCH: ${{ steps.normalize.outputs.base_branch }}
         RELEASE_BRANCH: ${{ inputs.release_branch }}
         CREATE_BRANCH: ${{ inputs.create_branch }}
         ACTOR: ${{ inputs.actor }}
