@@ -154,6 +154,24 @@ runs:
             echo "| Release branch | \`${RELEASE_BRANCH}\` *(will be created)* |"
           fi
           echo ""
+          echo "#### Commits in this release"
+          echo ""
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          _log_commits() {
+            git log "$@" --format="%H %s" --no-decorate \
+              | while IFS= read -r line; do
+                  sha="${line%% *}"
+                  msg="${line#* }"
+                  short="${sha:0:7}"
+                  echo "- [\`${short}\`](${REPO_URL}/commit/${sha}) ${msg}"
+                done
+          }
+          if git rev-parse "${CURRENT_VERSION}" >/dev/null 2>&1; then
+            _log_commits "${CURRENT_VERSION}..HEAD"
+          else
+            _log_commits HEAD
+          fi
+          echo ""
           echo "> Approve the **release-gate** environment below to proceed."
         } >> "$GITHUB_STEP_SUMMARY"
 
