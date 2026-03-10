@@ -177,9 +177,11 @@ runs:
         env:
           GITHUB_TOKEN: ${{ steps.sts.outputs.GH_TOKEN || inputs.github-token }}
         run: |
+          # GITHUB_REPOSITORY is owner/repo (e.g. odigos-io/odigos). Strip the longest prefix through the last "/" to get just the repo name for --repo.
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
           ${{ env.RELEASE_NOTES_BIN }} \
             --org='odigos-io' \
-            --repo='odigos' \
+            --repo="${REPO_NAME}" \
             --required-author='' \
             --dependencies=false \
             --release-note-regex='(?sU)```release-notes?\r?\n(?P<note>.+)\r?\n```' \
