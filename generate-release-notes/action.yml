@@ -195,12 +195,13 @@ runs:
         shell: bash
         run: |
           # GitHub multiline output format is name<<DELIMITER, content, DELIMITER.
-          # Use a random delimiter so the notes content cannot accidentally contain it
-          # and end the value early.
+          # Use a random delimiter so the notes content cannot accidentally contain it.
+          # Ensure a newline before the closing delimiter so it is on its own line even
+          # when release-notes.md does not end with a newline (otherwise "Matching delimiter not found").
           DELIM="release_notes_eof_$(openssl rand -hex 8)"
           echo "release_notes<<${DELIM}" >> $GITHUB_OUTPUT
           cat release-notes.md >> $GITHUB_OUTPUT
-          echo "${DELIM}" >> $GITHUB_OUTPUT
+          printf '\n%s\n' "${DELIM}" >> $GITHUB_OUTPUT
 
       - name: Truncate release notes for GitHub
         id: truncate
