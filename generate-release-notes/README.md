@@ -81,7 +81,6 @@ jobs:
 |-------|----------|---------|-------------|
 | `tag` | Yes | — | Tag of the release (e.g. `v1.19.1`, `v1.17.0-rc1`). Must be an exact semver tag: `vX.Y.Z` or `vX.Y.Z-rcN`. |
 | `release-branch` | Yes | — | Branch used as scope for the release-notes tool (e.g. `main`). |
-| `repo` | No | `odigos` | Repo name for the generate command (org is odigos-io). |
 | `github-token` | If not using STS | — | Token for checkout, API, and `gh release edit`. Use `${{ secrets.GITHUB_TOKEN }}` or a PAT with `contents: write`. |
 | `sts_identity` | If not using github-token | `""` | STS identity for short-lived tokens (scope is `github.repository`). Calling job must have `id-token: write`. See [../sts/README.md](../sts/README.md). |
 | `dry-run` | No | `"false"` | If `"true"`, notes are still generated and the `release-notes` artifact is uploaded, but the GitHub release body is **not** updated. Use for previews or when downstream steps consume the artifact. |
