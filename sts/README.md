@@ -9,12 +9,12 @@ Fetches short-lived GitHub credentials via the [octo-sts](https://octo-sts.dev) 
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `pairs` | — | `""` | Newline-separated `scope:identity` entries *(preferred)* |
-| `scope` | — | `""` | Single repo scope — backward-compatible alternative to `pairs` |
+| `scope` | — | `${{ github.repository }}` | Single repo scope — defaults to the current repository |
 | `identity` | — | `""` | Identity name — used together with `scope` |
 | `output-git-config` | — | `true` | Write a gitconfig file and include it globally |
 | `domain` | — | `octo-sts.dev` | octo-sts service domain |
 
-Exactly one of `pairs` **or** `scope`+`identity` must be provided. Passing both is an error.
+Exactly one of `pairs` **or** `identity` (with optional `scope`) must be provided. When `scope` is omitted it defaults to the current repository. Passing both `pairs` and `scope`/`identity` is an error.
 
 ## Outputs
 
@@ -52,21 +52,31 @@ jobs:
 
 ## Usage
 
-### Single repo
+### Current repo (scope omitted)
+
+When you only need a token for the repository running the workflow, just pass `identity`:
 
 ```yaml
 - uses: odigos-io/ci-core/sts@main
   with:
-    pairs: "odigos-io/my-private-repo:my-identity"
+    identity: "ro"
 ```
 
-Or using the legacy inputs (backward-compatible):
+### Single repo (explicit scope)
 
 ```yaml
 - uses: odigos-io/ci-core/sts@main
   with:
     scope: "odigos-io/my-private-repo"
     identity: "my-identity"
+```
+
+Or using the `pairs` input:
+
+```yaml
+- uses: odigos-io/ci-core/sts@main
+  with:
+    pairs: "odigos-io/my-private-repo:my-identity"
 ```
 
 ### Multiple repos
