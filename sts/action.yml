@@ -20,7 +20,7 @@ inputs:
 
   # ── single-pair (backward-compatible) ──────────────────────────────────────
   scope:
-    description: "GitHub repo scope for the STS token (e.g., odigos-io/ebpf-core)"
+    description: "GitHub repo scope for the STS token. Defaults to the current repository."
     required: false
     default: ${{ github.repository }}
   identity:
