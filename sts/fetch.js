@@ -11,6 +11,7 @@ async function run({
   fetchFn       = globalThis.fetch,
   execFileSync  = childProcess.execFileSync,
   env           = process.env,
+  sleepFn       = (ms) => new Promise(r => setTimeout(r, ms)),
 } = {}) {
 
   const rawPairs        = (env.PAIRS     || '').trim();
@@ -76,11 +77,21 @@ async function run({
       throw new Error(`empty OIDC token for ${scope}`);
     }
 
-    // ── step 2: exchange OIDC token → scoped GitHub token ──────────────────
-    const stsRes = await fetchFn(
-      `https://${domain}/sts/exchange?scope=${scope}&identity=${identity}`,
-      { headers: { Authorization: `Bearer ${oidcToken}` } },
-    );
+    // ── step 2: exchange OIDC token → scoped GitHub token (with retry on 5xx)
+    const stsUrl = `https://${domain}/sts/exchange?scope=${scope}&identity=${identity}`;
+    const stsHeaders = { headers: { Authorization: `Bearer ${oidcToken}` } };
+    const maxAttempts = 3;
+    let stsRes;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      stsRes = await fetchFn(stsUrl, stsHeaders);
+      if (stsRes.ok || stsRes.status < 500 || attempt === maxAttempts) break;
+      const delay = attempt * 1000;
+      process.stdout.write(
+        `::warning::STS exchange for ${scope}/${identity} returned HTTP ${stsRes.status} ` +
+        `(attempt ${attempt}/${maxAttempts}) – retrying in ${delay / 1000}s\n`,
+      );
+      await sleepFn(delay);
+    }
     if (!stsRes.ok) {
       const msg = await stsRes.text();
       throw new Error(`STS exchange failed for ${scope}/${identity}: HTTP ${stsRes.status} — ${msg}`);
