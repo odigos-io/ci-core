@@ -249,20 +249,84 @@ test('STS exchange returns no token → rejects', async () => {
   );
 });
 
-test('STS exchange HTTP error → rejects', async () => {
+test('STS exchange HTTP 4xx error → rejects immediately (no retry)', async () => {
   process.env.PAIRS = 'odigos-io/my-repo:my-identity';
 
   await assert.rejects(
     () => run({
       fetchFn: mockFetch(
         { body: { value: 'oidc-token' } },         // OIDC ok
-        { ok: false, status: 401, text: 'denied' }, // STS HTTP error
+        { ok: false, status: 401, text: 'denied' }, // STS 4xx — no retry
       ),
       execFileSync: noopExec,
       env: process.env,
+      sleepFn: async () => {},
     }),
     /STS exchange failed.*401/,
   );
+});
+
+test('STS exchange 500 → retries and succeeds on second attempt', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+
+  const sleepCalls = [];
+  await run({
+    fetchFn: mockFetch(
+      { body: { value: 'oidc-token' } },                  // OIDC ok
+      { ok: false, status: 500, text: 'internal error' },  // STS attempt 1 fails
+      { body: { token: 'ghp_retry_ok' } },                 // STS attempt 2 succeeds
+      { body: { id: 1, name: 'repo' } },                   // repo check ok
+    ),
+    execFileSync: noopExec,
+    env: process.env,
+    sleepFn: async (ms) => { sleepCalls.push(ms); },
+  });
+
+  assert.equal(readOutput().GH_TOKEN, 'ghp_retry_ok');
+  assert.deepStrictEqual(sleepCalls, [1000]);
+});
+
+test('STS exchange 502 → retries 3 times then rejects', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+
+  const sleepCalls = [];
+  await assert.rejects(
+    () => run({
+      fetchFn: mockFetch(
+        { body: { value: 'oidc-token' } },                  // OIDC ok
+        { ok: false, status: 502, text: 'bad gateway' },     // attempt 1
+        { ok: false, status: 502, text: 'bad gateway' },     // attempt 2
+        { ok: false, status: 502, text: 'bad gateway' },     // attempt 3
+      ),
+      execFileSync: noopExec,
+      env: process.env,
+      sleepFn: async (ms) => { sleepCalls.push(ms); },
+    }),
+    /STS exchange failed.*502/,
+  );
+
+  assert.deepStrictEqual(sleepCalls, [1000, 2000]);
+});
+
+test('STS exchange 500 → recovers on third attempt', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+
+  const sleepCalls = [];
+  await run({
+    fetchFn: mockFetch(
+      { body: { value: 'oidc-token' } },                  // OIDC ok
+      { ok: false, status: 500, text: 'error' },           // STS attempt 1
+      { ok: false, status: 503, text: 'unavailable' },     // STS attempt 2
+      { body: { token: 'ghp_third' } },                    // STS attempt 3 ok
+      { body: { id: 1, name: 'repo' } },                   // repo check ok
+    ),
+    execFileSync: noopExec,
+    env: process.env,
+    sleepFn: async (ms) => { sleepCalls.push(ms); },
+  });
+
+  assert.equal(readOutput().GH_TOKEN, 'ghp_third');
+  assert.deepStrictEqual(sleepCalls, [1000, 2000]);
 });
 
 test('repo permission check fails → rejects', async () => {
