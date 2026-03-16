@@ -147,6 +147,15 @@ test('legacy scope+identity → sets GH_TOKEN output', async () => {
   assert.equal(readOutput().GH_TOKEN, 'ghp_legacy');
 });
 
+test('identity-only with default scope (simulates github.repository default)', async () => {
+  process.env.SCOPE    = 'odigos-io/current-repo';
+  process.env.IDENTITY = 'ro';
+
+  await run({ fetchFn: mockFetch(...happyTriple('ghp_default_scope')), execFileSync: noopExec, env: process.env });
+
+  assert.equal(readOutput().GH_TOKEN, 'ghp_default_scope');
+});
+
 test('blank lines and comments in pairs are ignored', async () => {
   process.env.PAIRS = `
     # this is a comment
