@@ -1,14 +1,14 @@
-# Trivy Vulnerability Scanner
+# Vulnerability Scanner (Grype)
 
-A GitHub Actions composite action that scans container images or filesystem paths for vulnerabilities using [Trivy](https://github.com/aquasecurity/trivy) and displays results in the workflow summary.
+A GitHub Actions composite action that scans container images or filesystem paths for vulnerabilities using [Grype](https://github.com/anchore/grype) and displays results in the workflow summary.
 
 ## Features
 
-- 🔍 Scans container images or filesystem paths for security vulnerabilities
-- 📊 Displays all vulnerabilities in GitHub Actions summary with severity breakdown
-- ✅ Only reports vulnerabilities with available fixes (unfixed are ignored)
-- 🚨 Configurable severity cutoff to control when the workflow fails
-- 📋 Groups findings by severity (Critical, High, Medium, Low)
+- Scans container images or filesystem paths for security vulnerabilities
+- Displays all vulnerabilities in GitHub Actions summary with severity breakdown
+- Only reports vulnerabilities with available fixes (unfixed are ignored)
+- Configurable severity cutoff to control when the workflow fails
+- Groups findings by severity (Critical, High, Medium, Low)
 
 ## Usage
 
@@ -26,7 +26,7 @@ A GitHub Actions composite action that scans container images or filesystem path
 
 | Output | Description |
 |--------|-------------|
-| `results-json` | The raw Trivy scan results in JSON format |
+| `results-json` | The raw Grype scan results in JSON format |
 
 ### Scan a container image
 ```yaml
@@ -81,7 +81,7 @@ steps:
 
   - name: Process scan results
     run: |
-      echo '${{ steps.scan.outputs.results-json }}' | jq '.Results[].Vulnerabilities | length'
+      echo '${{ steps.scan.outputs.results-json }}' | jq '.matches | length'
 ```
 
 ## Behavior

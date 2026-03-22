@@ -1,5 +1,5 @@
-name: "A wrapper for Trivy to scan for vulnerabilities"
-description: "Scan container images or filesystem paths for vulnerabilities using Trivy"
+name: "Vulnerability Scanner (Grype)"
+description: "Scan container images or filesystem paths for vulnerabilities using Grype"
 
 inputs:
   image:
@@ -15,11 +15,10 @@ inputs:
 
 outputs:
   results-json:
-    description: "The raw Trivy scan results in JSON format"
+    description: "The raw Grype scan results in JSON format"
     value: ${{ steps.process-results.outputs.results-json }}
 
 runs:
-  # Composite implies that the below steps will be run in the same runner as the calling workflow and not in a separate container
   using: composite
   steps:
     - name: Validate Inputs
@@ -29,43 +28,35 @@ runs:
         echo "Error: You must provide either 'image' or 'path' input."
         exit 1
 
-    # Install trivy directly from GitHub Releases with checksum verification.
-    # Avoids aquasecurity/trivy-action and aquasecurity/setup-trivy, both of which
-    # dynamically execute scripts from aquasecurity/trivy@main — unsafe after the
-    # aquasecurity org breach (March 2026).
-    - name: Install Trivy
+    - name: Install Grype
       shell: bash
       env:
-        TRIVY_VERSION: "0.69.3"
+        GRYPE_VERSION: "0.110.0"
       run: |
-        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-        curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o trivy_checksums.txt
-        grep "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt | sha256sum -c -
-        tar xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
-        sudo mv trivy /usr/local/bin/trivy
-        rm "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy_checksums.txt
+        curl -sSfL "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz" -o "grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+        curl -sSfL "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt" -o grype_checksums.txt
+        grep "grype_${GRYPE_VERSION}_linux_amd64.tar.gz" grype_checksums.txt | sha256sum -c -
+        tar xzf "grype_${GRYPE_VERSION}_linux_amd64.tar.gz" grype
+        sudo mv grype /usr/local/bin/grype
+        rm "grype_${GRYPE_VERSION}_linux_amd64.tar.gz" grype_checksums.txt
 
     - name: Scan Image for Vulnerabilities
       if: ${{ inputs.image != '' && inputs.path == '' }}
       shell: bash
       run: |
-        trivy image \
-          --format json \
-          --output trivy-results.json \
-          --ignore-unfixed \
-          --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-          ${{ inputs.image }}
+        grype ${{ inputs.image }} \
+          -o json \
+          --only-fixed \
+          --file grype-results.json
 
     - name: Scan Path for Vulnerabilities
       if: ${{ inputs.path != '' && inputs.image == '' }}
       shell: bash
       run: |
-        trivy fs \
-          --format json \
-          --output trivy-results.json \
-          --ignore-unfixed \
-          --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-          ${{ inputs.path }}
+        grype dir:${{ inputs.path }} \
+          -o json \
+          --only-fixed \
+          --file grype-results.json
 
     - name: Display in Summary
       if: always()
@@ -75,20 +66,18 @@ runs:
         echo "## 🔍 Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
-        JSON_FILE="trivy-results.json"
+        JSON_FILE="grype-results.json"
         if [ -f "$JSON_FILE" ]; then
           SEVERITY_CUTOFF="${{ inputs.severity-cutoff }}"
-          
-          # Trivy JSON format has Results array with Vulnerabilities inside each result
-          TOTAL=$(jq '[.Results[]?.Vulnerabilities // [] | .[]] | length' "$JSON_FILE")
-          CRITICAL=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "CRITICAL")] | length' "$JSON_FILE")
-          HIGH=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH")] | length' "$JSON_FILE")
-          MEDIUM=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "MEDIUM")] | length' "$JSON_FILE")
-          LOW=$(jq '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "LOW")] | length' "$JSON_FILE")
-          
-          # Set output for trivy results
+
+          TOTAL=$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")
+          CRITICAL=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Critical")] | length' "$JSON_FILE")
+          HIGH=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "High")] | length' "$JSON_FILE")
+          MEDIUM=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Medium")] | length' "$JSON_FILE")
+          LOW=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Low")] | length' "$JSON_FILE")
+
           echo "results-json=$(cat $JSON_FILE | jq -c .)" >> $GITHUB_OUTPUT
-          
+
           echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
@@ -97,43 +86,38 @@ runs:
           echo "| 🔵 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Critical vulnerabilities
+
           if [ "$CRITICAL" -gt 0 ]; then
             echo "### 🔴 Critical Vulnerabilities ($CRITICAL)" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "CRITICAL")] | .[] | "- **\(.VulnerabilityID)** in `\(.PkgName)@\(.InstalledVersion)` (Fixed: \(.FixedVersion // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "Critical")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          # High vulnerabilities
+
           if [ "$HIGH" -gt 0 ]; then
             echo "### 🟠 High Vulnerabilities ($HIGH)" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "HIGH")] | .[] | "- **\(.VulnerabilityID)** in `\(.PkgName)@\(.InstalledVersion)` (Fixed: \(.FixedVersion // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "High")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          # Medium vulnerabilities
+
           if [ "$MEDIUM" -gt 0 ]; then
             echo "<details><summary>🟡 Medium Vulnerabilities ($MEDIUM)</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "MEDIUM")] | .[] | "- **\(.VulnerabilityID)** in `\(.PkgName)@\(.InstalledVersion)` (Fixed: \(.FixedVersion // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "Medium")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Low vulnerabilities
           if [ "$LOW" -gt 0 ]; then
             echo "<details><summary>🔵 Low Vulnerabilities ($LOW)</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.Results[]?.Vulnerabilities // [] | .[] | select(.Severity == "LOW")] | .[] | "- **\(.VulnerabilityID)** in `\(.PkgName)@\(.InstalledVersion)` (Fixed: \(.FixedVersion // "N/A"))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
+            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "Low")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Fail the step if vulnerabilities matching the severity cutoff were found
           if [ -n "$SEVERITY_CUTOFF" ]; then
             SHOULD_FAIL=false
-            
+
             if [[ "$SEVERITY_CUTOFF" == *"CRITICAL"* ]] && [ "$CRITICAL" -gt 0 ]; then
               SHOULD_FAIL=true
             fi
@@ -146,7 +130,7 @@ runs:
             if [[ "$SEVERITY_CUTOFF" == *"LOW"* ]] && [ "$LOW" -gt 0 ]; then
               SHOULD_FAIL=true
             fi
-            
+
             if [ "$SHOULD_FAIL" = true ]; then
               exit 1
             fi
