@@ -37,6 +37,10 @@ inputs:
   new_version:
     description: "The version string to tag (e.g. v1.3.0). Output of the calculate phase."
     required: false
+  previous_version:
+    description: "The previous version tag for release notes (e.g. v1.2.0). Output of the calculate phase (current_version)."
+    required: false
+    default: ""
   create_branch:
     description: "'true' if a new release branch should be created"
     required: false
@@ -275,14 +279,20 @@ runs:
       env:
         GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN }}
         NEW_VERSION: ${{ inputs.new_version }}
+        PREVIOUS_VERSION: ${{ inputs.previous_version }}
       run: |
         PRERELEASE_FLAG=""
         if [[ "${NEW_VERSION}" == *"-pre."* || "${NEW_VERSION}" == *"-rc."* ]]; then
           PRERELEASE_FLAG="--prerelease"
         fi
 
+        GENERATE_NOTES_ARGS=(-f tag_name="${NEW_VERSION}")
+        if [[ -n "${PREVIOUS_VERSION}" ]]; then
+          GENERATE_NOTES_ARGS+=(-f previous_tag_name="${PREVIOUS_VERSION}")
+        fi
+
         NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-          -f tag_name="${NEW_VERSION}" \
+          "${GENERATE_NOTES_ARGS[@]}" \
           --jq '.body')
 
         MAX=124000
