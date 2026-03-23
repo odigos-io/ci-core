@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      current_version: ${{ steps.calc.outputs.current_version }}
       new_version: ${{ steps.calc.outputs.new_version }}
       create_branch: ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
@@ -101,6 +102,7 @@ jobs:
           base_branch: ${{ needs.calculate.outputs.base_branch }}
           sts_identity: tag-releaser
           new_version: ${{ needs.calculate.outputs.new_version }}
+          previous_version: ${{ needs.calculate.outputs.current_version }}
           create_branch: ${{ needs.calculate.outputs.create_branch }}
           release_branch: ${{ needs.calculate.outputs.release_branch }}
           actor: ${{ github.actor }}

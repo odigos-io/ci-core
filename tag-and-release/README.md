@@ -200,6 +200,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      current_version: ${{ steps.calc.outputs.current_version }}
       new_version:    ${{ steps.calc.outputs.new_version }}
       create_branch:  ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
@@ -249,9 +250,10 @@ jobs:
           bump: ${{ inputs.bump }}
           base_branch: ${{ inputs.base_branch }}
           sts_identity: your-identity
-          new_version:    ${{ needs.calculate.outputs.new_version }}
-          create_branch:  ${{ needs.calculate.outputs.create_branch }}
-          release_branch: ${{ needs.calculate.outputs.release_branch }}
+          new_version:      ${{ needs.calculate.outputs.new_version }}
+          previous_version: ${{ needs.calculate.outputs.current_version }}
+          create_branch:    ${{ needs.calculate.outputs.create_branch }}
+          release_branch:   ${{ needs.calculate.outputs.release_branch }}
           actor:   ${{ github.actor }}
           run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 ```
@@ -270,6 +272,7 @@ jobs:
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `new_version` | ✅ | — | Version to tag (from `calculate` outputs) |
+| `previous_version` | — | `""` | Previous version for release notes (from `calculate` outputs `current_version`) |
 | `bump` | ✅ | — | Original bump type (recorded in tag message) |
 | `base_branch` | ✅ | — | Branch being tagged (recorded in tag message) |
 | `create_branch` | — | `false` | Whether to create a release branch |
