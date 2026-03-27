@@ -27,6 +27,8 @@ runs:
         REPO="${{ github.repository }}" # <owner>/<repository_name>
         REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
 
+        WORKFLOW_RUN_URL="${{ github.server_url }}/$REPO/actions/runs/${{ github.run_id }}"
+
         if [ "${{ job.status }}" = "success" ]; then
           echo "Release notification SUCCESS"
           PAYLOAD=$(jq -n \
@@ -34,17 +36,16 @@ runs:
             --arg tag "${{ inputs.tag }}" \
             --arg repo_name "$REPOSITORY_NAME" \
             --arg release_pr_link "${{ inputs.release-pr-link }}" \
-            '{description: $desc, tag: $tag, repo_name: $repo_name, release_pr_link: $release_pr_link}')
+            --arg link "$WORKFLOW_RUN_URL" \
+            '{description: $desc, tag: $tag, repo_name: $repo_name, release_pr_link: $release_pr_link, link: $link}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
             "${{ inputs.webhook-url }}"
         else
           echo "Release notification FAILURE (ci workflow failed or cancelled)"
-          RUN_ID="${{ github.run_id }}"
-
           PAYLOAD=$(jq -n \
-            --arg link "https://github.com/$REPO/actions/runs/$RUN_ID" \
+            --arg link "$WORKFLOW_RUN_URL" \
             --arg desc "❌ ${{ inputs.failure-description }}" \
             --arg tag "${{ inputs.tag }}" \
             --arg repo_name "$REPOSITORY_NAME" \
