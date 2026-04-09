@@ -444,6 +444,30 @@ test('OUTPUT_GIT_CONFIG=false → git exec not called, no GIT_CONFIG_PATH output
 });
 
 // ---------------------------------------------------------------------------
+// Missing OIDC environment
+// ---------------------------------------------------------------------------
+
+test('missing ACTIONS_ID_TOKEN_REQUEST_URL → rejects with actionable message', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+  delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+
+  await assert.rejects(
+    () => run({ fetchFn: mockFetch(), execFileSync: noopExec, env: process.env }),
+    /id-token: write/,
+  );
+});
+
+test('missing ACTIONS_ID_TOKEN_REQUEST_TOKEN → rejects with actionable message', async () => {
+  process.env.PAIRS = 'odigos-io/my-repo:my-identity';
+  delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+
+  await assert.rejects(
+    () => run({ fetchFn: mockFetch(), execFileSync: noopExec, env: process.env }),
+    /id-token: write/,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Custom domain
 // ---------------------------------------------------------------------------
 
