@@ -33,6 +33,14 @@ async function run({
     throw new Error('one of "pairs" or "scope"+"identity" is required');
   }
 
+  // ── early check: id-token: write must be set ────────────────────────────────
+  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
+    throw new Error(
+      'GitHub Actions OIDC credentials are not available — ' +
+      'the calling workflow must include "permissions: id-token: write"',
+    );
+  }
+
   const pairsInput = hasPairs
     ? rawPairs
     : `${legacyScope}:${legacyIdentity}`;
