@@ -9,7 +9,7 @@
 // The repo must already be checked out with full history and tags
 // (fetch-depth: 0, fetch-tags: true) before this script runs.
 //
-// Version bump logic (based on the latest stable tag visible repo-wide):
+// Version bump logic (based on the latest stable tag; branch-scoped for patch):
 //
 //   major      v1.2.3        → v2.0.0         + creates releases/v2.0.x branch
 //   major      v2.0.0-pre.N  → v2.0.0           (promotes pre to stable; branch already exists)
@@ -199,8 +199,11 @@ function calculate({ execSync = defaultExecSync, env = process.env } = {}) {
         const latestAny = latest(scopedTags) ?? 'v0.0.0';
         const lav = parseVersion(latestAny);
         if (!lav.preType) {
-          // Latest is already stable — normal patch increment
-          newVersion = `v${major}.${minor}.${patch + 1}`;
+          // Latest is already stable — normal patch increment.
+          // Use the branch-scoped version (lav) instead of the global
+          // latest so we increment the correct series.
+          displayCurrent = latestAny;
+          newVersion = `v${lav.major}.${lav.minor}.${lav.patch + 1}`;
         } else {
           const baseVer = `v${lav.major}.${lav.minor}.${lav.patch}`;
           if (tagExists(baseVer)) {

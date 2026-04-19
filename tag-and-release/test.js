@@ -263,6 +263,20 @@ test('patch on release branch (stable) → normal increment', () => {
   assert.equal(r.newVersion, 'v1.3.1');
 });
 
+test('patch on release branch scopes to branch, ignores globally higher tags', () => {
+  // Repo has v0.0.14 on releases/v0.0.x and v0.1.0, v0.2.0, v0.3.0 on other
+  // branches. Only v0.0.14 is reachable from HEAD (releases/v0.0.x).
+  // The calculate step must produce v0.0.15, NOT v0.3.1.
+  const allTags    = ['v0.0.14', 'v0.1.0', 'v0.2.0', 'v0.3.0'];
+  const mergedTags = ['v0.0.14'];
+  const r = calculate({
+    execSync: makeExecSync(allTags, mergedTags),
+    env: { BUMP: 'patch', BASE_BRANCH: 'releases/v0.0.x' },
+  });
+  assert.equal(r.currentVersion, 'v0.0.14');
+  assert.equal(r.newVersion,     'v0.0.15');
+});
+
 test('patch on release branch (pre only, no stable base) → promotes to stable', () => {
   // releases/v1.3.x has v1.3.0-pre.1 but v1.3.0 stable not yet released
   const allTags    = ['v1.2.3', 'v1.3.0-pre.1'];
