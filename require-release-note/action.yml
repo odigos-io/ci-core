@@ -12,17 +12,17 @@ runs:
   steps:
     - name: Skip release note check for bots
       shell: bash
-      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.actor) }}
-      run: echo "PR opened by ${{ github.actor }} - release note check skipped."
+      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
+      run: echo "PR opened by ${{ github.event.pull_request.user.login }} - release note check skipped."
 
     - name: Check release note block
       shell: bash
-      if: ${{ github.event.pull_request.user.type != 'Bot' || !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
+      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
         echo "$PR_BODY" > pr_body.txt
-        
+
         if ! grep -q '^```release-note' pr_body.txt; then
           echo "❌ Missing \`\`\`release-note block"
           exit 1

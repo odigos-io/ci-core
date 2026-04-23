@@ -16,11 +16,11 @@ runs:
   steps:
     - name: Skip Linear check for bots
       shell: bash
-      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.actor) }}
-      run: echo "PR opened by ${{ github.actor }} - Linear check skipped."
+      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
+      run: echo "PR opened by ${{ github.event.pull_request.user.login }} - Linear check skipped."
 
     - name: Ensure PR links a Linear issue
-      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.actor) }}
+      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
       uses: copilotmoney/linear-pr-check@de6d3f5b53dccbb18f782506fbdb8fba0456bce5
       with:
         prefix: ${{ inputs.linear-prefix-regex }}
