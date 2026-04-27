@@ -76,16 +76,16 @@ runs:
         echo "" >> "$GITHUB_STEP_SUMMARY"
 
         JSON_FILE="grype-results.json"
+        if [ ! -f "$JSON_FILE" ]; then
+          echo "✅ No vulnerabilities found!" >> "$GITHUB_STEP_SUMMARY"
+          echo "results-json={}" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
 
-          TOTAL=$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")
-          CRITICAL=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Critical")] | length' "$JSON_FILE")
-          HIGH=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "High")] | length' "$JSON_FILE")
-          MEDIUM=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Medium")] | length' "$JSON_FILE")
-          LOW=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Low")] | length' "$JSON_FILE")
-
-          echo "results-json=$(cat $JSON_FILE | jq -c .)" >> $GITHUB_OUTPUT
+        echo "results-json=$(jq -c . "$JSON_FILE")" >> "$GITHUB_OUTPUT"
 
         SEVERITY_CUTOFF="$(echo "$SEVERITY_CUTOFF_INPUT" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
+        VERBOSITY_NORMALIZED="$(echo "${VERBOSITY:-basic}" | tr '[:upper:]' '[:lower:]')"
 
         TOTAL="$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")"
         CRITICAL="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "critical")] | length' "$JSON_FILE")"
@@ -108,11 +108,7 @@ runs:
 
         write_vulnerability_basic() {
           local match="$1"
-
-          local vuln_id
-          local artifact_name
-          local artifact_version
-          local fixed_versions
+          local vuln_id artifact_name artifact_version fixed_versions
 
           vuln_id="$(echo "$match" | jq -r '.vulnerability.id // "UNKNOWN"')"
           artifact_name="$(echo "$match" | jq -r '.artifact.name // "unknown-artifact"')"
@@ -124,11 +120,8 @@ runs:
 
         write_vulnerability_detailed() {
           local match="$1"
-
-          local vuln_id
-          local artifact_name
-          local artifact_version
-          local fixed_versions
+          local vuln_id artifact_name artifact_version fixed_versions
+          local wrote_path=false
 
           vuln_id="$(echo "$match" | jq -r '.vulnerability.id // "UNKNOWN"')"
           artifact_name="$(echo "$match" | jq -r '.artifact.name // "unknown-artifact"')"
@@ -139,8 +132,6 @@ runs:
           echo "  - Artifact: \`${artifact_name}@${artifact_version}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "  - Fixed Versions: ${fixed_versions}" >> "$GITHUB_STEP_SUMMARY"
           echo "  - Detection Paths:" >> "$GITHUB_STEP_SUMMARY"
-
-          local wrote_path=false
 
           while IFS= read -r primary_path; do
             if [ -n "$primary_path" ]; then
@@ -179,12 +170,11 @@ runs:
           fi
 
           while IFS= read -r match; do
-            if [ "$VERBOSITY" = "detailed" ]; then
+            if [ "$VERBOSITY_NORMALIZED" = "detailed" ]; then
               write_vulnerability_detailed "$match"
             else
               write_vulnerability_basic "$match"
             fi
-
             echo "" >> "$GITHUB_STEP_SUMMARY"
           done < <(jq -c --arg severity "$severity" '.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == ($severity | ascii_downcase))' "$JSON_FILE")
 
@@ -192,34 +182,38 @@ runs:
             echo "</details>" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ "$LOW" -gt 0 ]; then
-            echo "<details><summary>🔵 Low Vulnerabilities ($LOW)</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "Low")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+        }
+
+        write_section "critical" "🔴 Critical Vulnerabilities" "$CRITICAL" "false"
+        write_section "high" "🟠 High Vulnerabilities" "$HIGH" "false"
+        write_section "medium" "🟡 Medium Vulnerabilities" "$MEDIUM" "true"
+        write_section "low" "🔵 Low Vulnerabilities" "$LOW" "true"
+        write_section "negligible" "⚪ Negligible Vulnerabilities" "$NEGLIGIBLE" "true"
+        write_section "unknown" "❔ Unknown Vulnerabilities" "$UNKNOWN" "true"
+
+        SHOULD_FAIL=false
+        if [ -n "$SEVERITY_CUTOFF" ]; then
+          if [[ "$SEVERITY_CUTOFF" == *"CRITICAL"* ]] && [ "$CRITICAL" -gt 0 ]; then
+            SHOULD_FAIL=true
           fi
-
-          if [ -n "$SEVERITY_CUTOFF" ]; then
-            SHOULD_FAIL=false
-
-            if [[ "$SEVERITY_CUTOFF" == *"CRITICAL"* ]] && [ "$CRITICAL" -gt 0 ]; then
-              SHOULD_FAIL=true
-            fi
-            if [[ "$SEVERITY_CUTOFF" == *"HIGH"* ]] && [ "$HIGH" -gt 0 ]; then
-              SHOULD_FAIL=true
-            fi
-            if [[ "$SEVERITY_CUTOFF" == *"MEDIUM"* ]] && [ "$MEDIUM" -gt 0 ]; then
-              SHOULD_FAIL=true
-            fi
-            if [[ "$SEVERITY_CUTOFF" == *"LOW"* ]] && [ "$LOW" -gt 0 ]; then
-              SHOULD_FAIL=true
-            fi
-
-            if [ "$SHOULD_FAIL" = true ]; then
-              exit 1
-            fi
+          if [[ "$SEVERITY_CUTOFF" == *"HIGH"* ]] && [ "$HIGH" -gt 0 ]; then
+            SHOULD_FAIL=true
           fi
-        else
-          echo "✅ No vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+          if [[ "$SEVERITY_CUTOFF" == *"MEDIUM"* ]] && [ "$MEDIUM" -gt 0 ]; then
+            SHOULD_FAIL=true
+          fi
+          if [[ "$SEVERITY_CUTOFF" == *"LOW"* ]] && [ "$LOW" -gt 0 ]; then
+            SHOULD_FAIL=true
+          fi
+          if [[ "$SEVERITY_CUTOFF" == *"NEGLIGIBLE"* ]] && [ "$NEGLIGIBLE" -gt 0 ]; then
+            SHOULD_FAIL=true
+          fi
+          if [[ "$SEVERITY_CUTOFF" == *"UNKNOWN"* ]] && [ "$UNKNOWN" -gt 0 ]; then
+            SHOULD_FAIL=true
+          fi
+        fi
+
+        if [ "$SHOULD_FAIL" = true ]; then
+          exit 1
         fi
