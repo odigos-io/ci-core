@@ -137,7 +137,6 @@ When using the detailed output:
   - Fixed Versions: 1.1.2
   - Detection Paths:
     - (primary) /path/to/deps/file/composer.lock
-
 ...
 
 ### 🟠 High Vulnerabilities (8)
