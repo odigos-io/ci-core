@@ -14,11 +14,12 @@ A GitHub Actions composite action that scans container images or filesystem path
 
 ### Inputs
 
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
-| `image` | Container image to scan (e.g., `nginx:latest`, `myregistry.com/myimage:tag`) | No* | - |
-| `path` | Filesystem path to scan (e.g., `.` or `src/`) | No* | - |
-| `severity-cutoff` | Comma-separated list of severity levels that will cause the workflow to fail (e.g., `HIGH,CRITICAL`). Leave empty to never fail. | No | `HIGH,CRITICAL` |
+| Input | Description | Required | Default | Options |
+|-------|-------------|----------|---------|---------|
+| `image` | Container image to scan (e.g., `nginx:latest`, `myregistry.com/myimage:tag`) | No* | - | - |
+| `path` | Filesystem path to scan (e.g., `.` or `src/`) | No* | - | - |
+| `severity-cutoff` | Comma-separated list of severity levels that will cause the workflow to fail (e.g., `HIGH,CRITICAL`). Leave empty to never fail. | No | `HIGH,CRITICAL` | - |
+| `verbosiry` | The verbosity level for the action summary | No* | `basic` | `basic`/`detailed` |
 
 \* You must provide either `image` or `path`, but not both.
 
@@ -42,7 +43,7 @@ steps:
 steps:
   - name: Checkout code
     uses: actions/checkout@v4
-    
+
   - name: Scan code for vulnerabilities
     uses: odigos-io/ci-core/vulnerabilities-scanner@main
     with:
@@ -116,3 +117,36 @@ The action generates a summary that looks like:
 - **CVE-2024-1234** in `package@1.2.3` (Fixed: 1.2.4)
 ...
 ```
+
+
+When using the detailed output:
+```
+🔍 Vulnerability Scan Results
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 2 |
+| 🟠 High | 8 |
+| 🟡 Medium | 15 |
+| 🔵 Low | 5 |
+| **Total** | **30** |
+
+### 🔴 Critical Vulnerabilities (2)
+- *CVE-2024-0001*
+  - Artifact: `openssl@1.1.1`
+  - Fixed Versions: 1.1.2
+  - Detection Paths:
+    - (primary) /path/to/deps/file/composer.lock
+...
+
+### 🟠 High Vulnerabilities (8)
+- *CVE-2024-1234*
+  - Artifact: `package@1.2.3`
+  - Fixed Versions: 1.4.2
+  - Detection Paths:
+    - (primary) /path/to/deps/file/composer.lock
+    - (secondary) /path/to/deps/file/composer.manifest
+...
+```
+
+
