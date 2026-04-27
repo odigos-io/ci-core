@@ -13,13 +13,9 @@ inputs:
     required: false
     default: "HIGH,CRITICAL"
   verbosity:
-    description: 'Verbosity level for the summary'
+    description: "Verbosity level for the summary (basic or detailed)"
     required: false
-    default: 'basic'
-    type: choice
-    options:
-      - basic
-      - detailed
+    default: "basic"
 
 outputs:
   results-json:
@@ -70,14 +66,16 @@ runs:
       if: always()
       id: process-results
       shell: bash
+      env:
+        SEVERITY_CUTOFF_INPUT: ${{ inputs.severity-cutoff }}
+        VERBOSITY: ${{ inputs.verbosity }}
       run: |
-        echo "## 🔍 Vulnerability Scan Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
+        set -euo pipefail
+
+        echo "## 🔍 Vulnerability Scan Results" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
 
         JSON_FILE="grype-results.json"
-        if [ -f "$JSON_FILE" ]; then
-          SEVERITY_CUTOFF="${{ inputs.severity-cutoff }}"
-          VERBOSITY="${{ inputs.verbosity }}"
 
           TOTAL=$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")
           CRITICAL=$(jq '[.matches // [] | .[] | select(.vulnerability.severity == "Critical")] | length' "$JSON_FILE")
@@ -87,58 +85,111 @@ runs:
 
           echo "results-json=$(cat $JSON_FILE | jq -c .)" >> $GITHUB_OUTPUT
 
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🟡 Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔵 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+        SEVERITY_CUTOFF="$(echo "$SEVERITY_CUTOFF_INPUT" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
 
-          if [ "$CRITICAL" -gt 0 ]; then
-            echo "### 🔴 Critical Vulnerabilities ($CRITICAL)" >> $GITHUB_STEP_SUMMARY
-            while IFS= read -r match; do
-              VULN_ID=$(echo "$match" | jq -r '.vulnerability.id')
-              ARTIFACT_NAME=$(echo "$match" | jq -r '.artifact.name')
-              ARTIFACT_VERSION=$(echo "$match" | jq -r '.artifact.version')
-              FIXED_VERSIONS=$(echo "$match" | jq -r '.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end')
+        TOTAL="$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")"
+        CRITICAL="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "critical")] | length' "$JSON_FILE")"
+        HIGH="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "high")] | length' "$JSON_FILE")"
+        MEDIUM="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "medium")] | length' "$JSON_FILE")"
+        LOW="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "low")] | length' "$JSON_FILE")"
+        NEGLIGIBLE="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "negligible")] | length' "$JSON_FILE")"
+        UNKNOWN="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "unknown")] | length' "$JSON_FILE")"
 
-              if [ "$VERBOSITY" = "basic" ]; then
-                echo "- **$VULN_ID** in \`$ARTIFACT_NAME@$ARTIFACT_VERSION\` (Fixed: $FIXED_VERSIONS)"
-              elif [ "$VERBOSITY" = "detailed" ]; then
-                echo "- **$VULN_ID**" >> $GITHUB_STEP_SUMMARY
-                echo "  - Artifact: \`$ARTIFACT_NAME@$ARTIFACT_VERSION\`" >> $GITHUB_STEP_SUMMARY
-                echo "  - Fixed Versions: $FIXED_VERSIONS" >> $GITHUB_STEP_SUMMARY
+        echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+        echo "| 🔴 Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| 🟠 High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| 🟡 Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| 🔵 Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| ⚪ Negligible | $NEGLIGIBLE |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| ❔ Unknown | $UNKNOWN |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| **Total** | **$TOTAL** |" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
 
-                echo "  - Detection Paths:" >> $GITHUB_STEP_SUMMARY
+        write_vulnerability_basic() {
+          local match="$1"
 
-                while IFS= read -r primary_path; do
-                  [ -n "$primary_path" ] && echo "    - (primary) \`$primary_path\`" >> $GITHUB_STEP_SUMMARY
-                done < <(echo "$match" | jq -r '.artifact.locations // [] | .[] | select(.annotations.evidence == "primary") | (.path // .accessPath // empty)')
+          local vuln_id
+          local artifact_name
+          local artifact_version
+          local fixed_versions
 
-                while IFS= read -r supporting_path; do
-                  [ -n "$supporting_path" ] && echo "    - (supporting) \`$supporting_path\`" >> $GITHUB_STEP_SUMMARY
-                done < <(echo "$match" | jq -r '.artifact.locations // [] | .[] | select(.annotations.evidence == "supporting") | (.path // .accessPath // empty)')
-              fi
+          vuln_id="$(echo "$match" | jq -r '.vulnerability.id // "UNKNOWN"')"
+          artifact_name="$(echo "$match" | jq -r '.artifact.name // "unknown-artifact"')"
+          artifact_version="$(echo "$match" | jq -r '.artifact.version // "unknown-version"')"
+          fixed_versions="$(echo "$match" | jq -r '.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end')"
 
-              echo "" >> $GITHUB_STEP_SUMMARY
-            done < <(jq -c '.matches // [] | .[] | select(.vulnerability.severity == "Critical")' "$JSON_FILE")
-            echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **${vuln_id}** in \`${artifact_name}@${artifact_version}\` (Fixed: ${fixed_versions})" >> "$GITHUB_STEP_SUMMARY"
+        }
+
+        write_vulnerability_detailed() {
+          local match="$1"
+
+          local vuln_id
+          local artifact_name
+          local artifact_version
+          local fixed_versions
+
+          vuln_id="$(echo "$match" | jq -r '.vulnerability.id // "UNKNOWN"')"
+          artifact_name="$(echo "$match" | jq -r '.artifact.name // "unknown-artifact"')"
+          artifact_version="$(echo "$match" | jq -r '.artifact.version // "unknown-version"')"
+          fixed_versions="$(echo "$match" | jq -r '.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end')"
+
+          echo "- **${vuln_id}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - Artifact: \`${artifact_name}@${artifact_version}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - Fixed Versions: ${fixed_versions}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - Detection Paths:" >> "$GITHUB_STEP_SUMMARY"
+
+          local wrote_path=false
+
+          while IFS= read -r primary_path; do
+            if [ -n "$primary_path" ]; then
+              echo "    - (primary) \`${primary_path}\`" >> "$GITHUB_STEP_SUMMARY"
+              wrote_path=true
+            fi
+          done < <(echo "$match" | jq -r '.artifact.locations // [] | .[] | select(.annotations.evidence == "primary") | (.path // .accessPath // empty)')
+
+          while IFS= read -r supporting_path; do
+            if [ -n "$supporting_path" ]; then
+              echo "    - (supporting) \`${supporting_path}\`" >> "$GITHUB_STEP_SUMMARY"
+              wrote_path=true
+            fi
+          done < <(echo "$match" | jq -r '.artifact.locations // [] | .[] | select(.annotations.evidence == "supporting") | (.path // .accessPath // empty)')
+
+          if [ "$wrote_path" = false ]; then
+            echo "    - N/A" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        }
+
+        write_section() {
+          local severity="$1"
+          local title="$2"
+          local count="$3"
+          local collapsible="$4"
+
+          if [ "$count" -le 0 ]; then
+            return 0
           fi
 
-          if [ "$HIGH" -gt 0 ]; then
-            echo "### 🟠 High Vulnerabilities ($HIGH)" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "High")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$collapsible" = "true" ]; then
+            echo "<details><summary>${title} (${count})</summary>" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ${title} (${count})" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ "$MEDIUM" -gt 0 ]; then
-            echo "<details><summary>🟡 Medium Vulnerabilities ($MEDIUM)</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            jq -r '[.matches // [] | .[] | select(.vulnerability.severity == "Medium")] | .[] | "- **\(.vulnerability.id)** in `\(.artifact.name)@\(.artifact.version)` (Fixed: \(.vulnerability.fix.versions // [] | if length > 0 then join(", ") else "N/A" end))"' "$JSON_FILE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          while IFS= read -r match; do
+            if [ "$VERBOSITY" = "detailed" ]; then
+              write_vulnerability_detailed "$match"
+            else
+              write_vulnerability_basic "$match"
+            fi
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -c --arg severity "$severity" '.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == ($severity | ascii_downcase))' "$JSON_FILE")
+
+          if [ "$collapsible" = "true" ]; then
+            echo "</details>" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$LOW" -gt 0 ]; then
