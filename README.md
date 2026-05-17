@@ -18,6 +18,7 @@
 
 ### Release Management
 1. [tag-and-release](./tag-and-release/README.md)
+1. [cherry-pick](./cherry-pick/README.md)
 
 ### Release and Deployment Notifications
 1. [slack-release-notification](./.github/actions/slack-release-notification/README.md)
