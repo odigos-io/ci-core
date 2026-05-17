@@ -27,7 +27,7 @@ inputs:
   release-branch-suffix:
     description: Suffix after the version in release branch names (e.g. .0 for releases/v1.3.0).
     required: false
-    default: .0
+    default: ".0"
 
   # ── extract ─────────────────────────────────────────────────────────────────
   cherry-pick-decision-identity:
