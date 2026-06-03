@@ -23,7 +23,9 @@ Short forms are accepted and normalized to `v1.X`:
 cherry-pick: 1.3, 1.4
 ```
 
-The expected major version defaults to `1` (`major-version` input). Set `major-version: "2"` to accept `v2.3` / `2.3` instead.
+The expected major version defaults to `1` (`major-version` input). Set for example `major-version: "0"` to accept `v0.x` instead.
+
+Lines inside HTML comments (`<!-- ... -->`) are ignored, so PR templates can document the format without triggering backports.
 
 Invalid entries are skipped with a warning. If the line is missing or no valid versions remain, the workflow exits without creating PRs.
 

@@ -172,7 +172,10 @@ runs:
         MAJOR="${MAJOR_VERSION:-1}"
         PR_BODY=$(cat .cherry-pick-workflow/pr_body.txt)
 
-        CHERRY_PICK_LINE=$(echo "$PR_BODY" | grep -i "^cherry-pick:" || true)
+        # Strip HTML comments so template examples (e.g. <!-- cherry-pick: v0.6 -->) are ignored.
+        PR_BODY=$(printf '%s' "$PR_BODY" | perl -0777 -pe 's/<!--.*?-->//gs')
+
+        CHERRY_PICK_LINE=$(printf '%s\n' "$PR_BODY" | grep -i "^cherry-pick:" | head -n 1 || true)
         if [[ -z "$CHERRY_PICK_LINE" ]]; then
           echo "No cherry-pick marker found in PR description"
           echo "versions=[]" >> "$GITHUB_OUTPUT"
