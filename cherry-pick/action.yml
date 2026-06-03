@@ -1,7 +1,7 @@
 name: Cherry Pick
 description: |
   Backport merged PRs to release branches when the PR description contains
-  `cherry-pick: v1.X` (comma-separated versions).
+  `cherry-pick: v{major}.X` (comma-separated versions; major defaults to 1).
 
   - operation: extract — resolve the merged PR for a push commit and parse target versions.
   - operation: backport — cherry-pick one version onto its release branch and open a pull request.
@@ -28,6 +28,10 @@ inputs:
     description: Suffix after the version in release branch names (e.g. .0 for releases/v1.3.0).
     required: false
     default: ".0"
+  major-version:
+    description: Expected major version in cherry-pick lines (e.g. 1 for v1.3 or 0 for v0.8).
+    required: false
+    default: "1"
 
   # ── extract ─────────────────────────────────────────────────────────────────
   cherry-pick-decision-identity:
@@ -161,8 +165,11 @@ runs:
       id: parse_versions
       if: ${{ inputs.operation == 'extract' && steps.find_pr.outputs.has_pr == 'true' && steps.pr_files.outcome == 'success' }}
       shell: bash
+      env:
+        MAJOR_VERSION: ${{ inputs.major-version }}
       run: |
         set -euo pipefail
+        MAJOR="${MAJOR_VERSION:-1}"
         PR_BODY=$(cat .cherry-pick-workflow/pr_body.txt)
 
         CHERRY_PICK_LINE=$(echo "$PR_BODY" | grep -i "^cherry-pick:" || true)
@@ -179,14 +186,14 @@ runs:
         IFS=',' read -ra VERSION_ARRAY <<< "$VERSIONS_STR"
         for version in "${VERSION_ARRAY[@]}"; do
           version=$(printf '%s' "$version" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-          if [[ "$version" =~ ^1\.[0-9]+$ ]]; then
+          if [[ "$version" =~ ^${MAJOR}\.[0-9]+$ ]]; then
             version="v${version}"
           fi
-          if [[ "$version" =~ ^v1\.[0-9]+$ ]]; then
+          if [[ "$version" =~ ^v${MAJOR}\.[0-9]+$ ]]; then
             VALID_VERSIONS+=("\"$version\"")
             echo "Valid version found: $version"
           else
-            echo "Warning: Invalid version format '$version' (expected v1.X or 1.X)"
+            echo "Warning: Invalid version format '$version' (expected v${MAJOR}.X or ${MAJOR}.X)"
           fi
         done
 
