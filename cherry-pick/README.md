@@ -23,6 +23,10 @@ Short forms are accepted and normalized to `v1.X`:
 cherry-pick: 1.3, 1.4
 ```
 
+The expected major version defaults to `1` (`major-version` input). Set for example `major-version: "0"` to accept `v0.x` instead.
+
+Lines inside HTML comments (`<!-- ... -->`) are ignored, so PR templates can document the format without triggering backports.
+
 Invalid entries are skipped with a warning. If the line is missing or no valid versions remain, the workflow exits without creating PRs.
 
 ---
@@ -178,6 +182,7 @@ Workflow-level `permissions: read-all` is sufficient when jobs grant `id-token: 
 | `base-branch` | No | `main` | both |
 | `release-branch-prefix` | No | `releases/` | backport |
 | `release-branch-suffix` | No | `.0` | backport |
+| `major-version` | No | `1` | extract |
 | `cherry-pick-decision-identity` | No | `cherry-pick-decision` | extract |
 | `commit-sha` | No | `${{ github.sha }}` | extract |
 | `create-pr-identity` | No | `create-pr` | backport |
