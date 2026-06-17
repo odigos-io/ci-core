@@ -1,0 +1,93 @@
+name: "Dispatch Agent Version Update"
+description: |
+  Dispatch an instrumentation-agent version bump from a release workflow to the odigos
+  consumer repos.
+  This action is called by an instrumentation repo's release workflow to dispatch the version bump to the consumer repos.
+
+  After the version bump is dispatched, the consumer repo will apply the version bump via the apply-agent-version-update action.
+inputs:
+  instrumentation_agent:
+    description: "Language instrumentation being released (e.g. php, ruby, python, golang)"
+    required: true
+  version:
+    description: "Released version to propagate (e.g. v0.11.0)"
+    required: true
+  consumers:
+    description: |
+      '&'-separated list of consumer repos to dispatch to (commas/spaces/newlines also accepted).
+      Valid entries: odigos, odigos-enterprise, vm-agent.
+      Defaults to all three (consumers that don't pin this instrumentation no-op safely).
+    required: false
+    default: "odigos&odigos-enterprise&vm-agent"
+
+runs:
+  using: composite
+  steps:
+    - name: Parse consumers
+      id: targets
+      shell: bash
+      env:
+        CONSUMERS: ${{ inputs.consumers }}
+      run: |
+        # Normalize separators (commas/newlines/spaces) to a single '&' delimiter and
+        # wrap with '&' on both ends, so `&odigos&` matches exactly and never collides
+        # with `&odigos-enterprise&`.
+        norm="&$(printf '%s' "$CONSUMERS" | tr ',\n ' '&&&' | tr -s '&')&"
+        echo "list=$norm" >> "$GITHUB_OUTPUT"
+
+    # ── odigos (OSS) ────────────────────────────────────────────────────────────
+    - name: Get sts token for Odigos OSS repo
+      if: ${{ contains(steps.targets.outputs.list, '&odigos&') }}
+      id: sts-oss
+      uses: odigos-io/ci-core/sts@main
+      with:
+        scope: odigos-io/odigos
+        identity: trigger-agent-version-updater
+        output-git-config: "false"
+
+    - name: Trigger update in Odigos OSS
+      if: ${{ contains(steps.targets.outputs.list, '&odigos&') }}
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ steps.sts-oss.outputs.GH_TOKEN }}
+        repository: odigos-io/odigos
+        event-type: update-instrumentation-agents-version
+        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
+
+    # ── odigos-enterprise ─────────────────────────────────────────────────────────
+    - name: Get sts token for Odigos Enterprise repo
+      if: ${{ contains(steps.targets.outputs.list, '&odigos-enterprise&') }}
+      id: sts-enterprise
+      uses: odigos-io/ci-core/sts@main
+      with:
+        scope: odigos-io/odigos-enterprise
+        identity: trigger-agent-version-updater
+        output-git-config: "false"
+
+    - name: Trigger update in Odigos Enterprise
+      if: ${{ contains(steps.targets.outputs.list, '&odigos-enterprise&') }}
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ steps.sts-enterprise.outputs.GH_TOKEN }}
+        repository: odigos-io/odigos-enterprise
+        event-type: update-instrumentation-agents-version
+        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
+
+    # ── vm-agent ──────────────────────────────────────────────────────────────────
+    - name: Get sts token for VM Agent repo
+      if: ${{ contains(steps.targets.outputs.list, '&vm-agent&') }}
+      id: sts-vmagent
+      uses: odigos-io/ci-core/sts@main
+      with:
+        scope: odigos-io/vm-agent
+        identity: trigger-agent-version-updater
+        output-git-config: "false"
+
+    - name: Trigger update in VM Agent
+      if: ${{ contains(steps.targets.outputs.list, '&vm-agent&') }}
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ steps.sts-vmagent.outputs.GH_TOKEN }}
+        repository: odigos-io/vm-agent
+        event-type: update-instrumentation-agents-version
+        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
