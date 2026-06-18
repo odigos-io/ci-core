@@ -35,6 +35,18 @@ runs:
         norm="&$(printf '%s' "$CONSUMERS" | tr ',\n ' '&&&' | tr -s '&')&"
         echo "list=$norm" >> "$GITHUB_OUTPUT"
 
+    - name: Build dispatch payload
+      id: payload
+      shell: bash
+      env:
+        INSTRUMENTATION_AGENT: ${{ inputs.instrumentation_agent }}
+        AGENT_VERSION: ${{ inputs.version }}
+      run: |
+        # Build JSON with jq so input values are safely escaped (no JSON/expression injection).
+        json="$(jq -nc --arg agent "$INSTRUMENTATION_AGENT" --arg version "$AGENT_VERSION" \
+          '{instrumentation_agent: $agent, new_agent_version: $version}')"
+        echo "json=$json" >> "$GITHUB_OUTPUT"
+
     # ── odigos (OSS) ────────────────────────────────────────────────────────────
     - name: Get sts token for Odigos OSS repo
       if: ${{ contains(steps.targets.outputs.list, '&odigos&') }}
@@ -52,7 +64,7 @@ runs:
         token: ${{ steps.sts-oss.outputs.GH_TOKEN }}
         repository: odigos-io/odigos
         event-type: update-instrumentation-agents-version
-        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
+        client-payload: ${{ steps.payload.outputs.json }}
 
     # ── odigos-enterprise ─────────────────────────────────────────────────────────
     - name: Get sts token for Odigos Enterprise repo
@@ -71,7 +83,7 @@ runs:
         token: ${{ steps.sts-enterprise.outputs.GH_TOKEN }}
         repository: odigos-io/odigos-enterprise
         event-type: update-instrumentation-agents-version
-        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
+        client-payload: ${{ steps.payload.outputs.json }}
 
     # ── vm-agent ──────────────────────────────────────────────────────────────────
     - name: Get sts token for VM Agent repo
@@ -90,4 +102,4 @@ runs:
         token: ${{ steps.sts-vmagent.outputs.GH_TOKEN }}
         repository: odigos-io/vm-agent
         event-type: update-instrumentation-agents-version
-        client-payload: '{"instrumentation_agent": "${{ inputs.instrumentation_agent }}", "new_agent_version": "${{ inputs.version }}"}'
+        client-payload: ${{ steps.payload.outputs.json }}

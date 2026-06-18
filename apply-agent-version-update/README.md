@@ -9,8 +9,8 @@ The per-repo mapping (category → image/module, Dockerfile vs go.mod) lives in 
 
 ## Usage
 
-The calling job checks out the repo (with an `ro` STS token) and, when the bump touches
-`go.mod`, sets up Go + private-module read tokens, then invokes this action:
+The calling job checks out the repo with a read-only STS token, then invokes this action
+(repos whose bump touches `go.mod` set up Go and any private-module read tokens beforehand):
 
 ```yaml
 jobs:
@@ -20,22 +20,14 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Resolve inputs
-        id: in
-        run: |  # map workflow_dispatch inputs / repository_dispatch payload -> instrumentation_agent + version
-          ...
-      - uses: odigos-io/ci-core/sts@main
-        id: sts
-        with: { scope: "${{ github.repository }}", identity: ro }
-      - uses: actions/checkout@v6
-        with: { token: "${{ steps.sts.outputs.GH_TOKEN }}" }
-      # (go-module repos only) setup-go + GOPRIVATE + private-deps read tokens here
+      # resolve instrumentation_agent + version from the trigger payload
+      # checkout with a read-only STS token
       - uses: odigos-io/ci-core/apply-agent-version-update@main
         with:
           instrumentation_agent: ${{ steps.in.outputs.instrumentation_agent }}
           version: ${{ steps.in.outputs.version }}
-          make_dir: odiglet         # or "." for repo-root makefiles (vm-agent)
-          webhook-url: ${{ secrets.ODIGOS_RELEASE_STATUS_WEBHOOK_URL }}
+          make_dir: <dir containing agent-deps.mk>
+          webhook-url: ${{ secrets.RELEASE_STATUS_WEBHOOK_URL }}
 ```
 
 ## Inputs
@@ -61,27 +53,18 @@ It must update whatever that repo pins for the instrumentation (Dockerfile image
 
 ## Canonical instrumentations
 
-One value == one release stream. Standardized across all repos so a single dispatched
-`instrumentation_agent` routes correctly everywhere:
+One `instrumentation_agent` value == one release stream, standardized across consuming repos so a
+single dispatched value routes correctly everywhere. The set of supported values is defined by each
+consumer repo's `upgrade-agent` make target; unknown values no-op.
 
-`python`, `php`, `ruby`, `nodejs-community`, `nodejs-enterprise`, `python-ebpf`, `java-ebpf`,
-`golang` — and `cpp` once onboarded.
+## Onboarding a new agent — zero framework change
 
-## Onboarding a new agent (e.g. cpp) — zero framework change
+A new agent needs no changes to this action or the dispatch action. In short:
 
-The slot is designed so a new agent needs no changes to this action or the wrappers:
+1. The instrumentation repo's release workflow calls `dispatch-agent-version-update` with the new
+   `instrumentation_agent` value and the `consumers` that pin it.
+2. Each consuming repo handles the new value in its own `upgrade-agent` make target.
+3. The relevant STS trust is granted in the consumer repos.
 
-1. **Instrumentation repo** — in its release workflow, call
-   `odigos-io/ci-core/dispatch-agent-version-update@main` with `instrumentation_agent: cpp`,
-   `version: <tag>`, and `consumers` listing the repos that pin it (e.g.
-   `consumers: "odigos-enterprise vm-agent"`).
-2. **Each consuming repo** — add a `cpp)` branch to that repo's `upgrade-agent` make-target
-   dispatcher that updates whatever it pins (image tag via `upgrade-agent-image` /
-   `upgrade-odiglet-agent-version`, and/or a `go get <module>@$(AGENT_VERSION)` + `go mod tidy`,
-   or a `go mod edit -replace` for a forked module).
-3. **octo-sts** — ensure the instrumentation repo is trusted by each target consumer's
-   `trigger-agent-version-updater` identity, and (for go.mod bumps) that the consumer can read
-   the new module repo (`ro` octo-sts identity or `RELEASE_BOT_TOKEN`).
-
-No change to `ci-core/apply-agent-version-update`, `ci-core/dispatch-agent-version-update`, or any
-consumer wrapper workflow is required.
+Repo-specific wiring (make targets, module read access, trust policies) lives in the consumer
+repos, not here.

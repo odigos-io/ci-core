@@ -20,24 +20,22 @@ jobs:
         with:
           instrumentation_agent: php
           version: ${{ needs.calculate.outputs.new_version }}
-          # consumers omitted -> dispatches to all three. For an enterprise-only agent:
-          # consumers: "odigos-enterprise&vm-agent"
+          # consumers omitted -> dispatches to all defaults.
+          # Set consumers to target a subset, e.g. consumers: "vm-agent"
 ```
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `instrumentation_agent` | yes | — | Language instrumentation being released (`php`, `ruby`, `python`, `java-ebpf`, `python-ebpf`, `nodejs-community`, `nodejs-enterprise`, `golang`, …). |
+| `instrumentation_agent` | yes | — | Language instrumentation being released (e.g. `php`, `ruby`, `python`, `golang`, …). |
 | `version` | yes | — | Released version to propagate (e.g. `v0.11.0`). |
 | `consumers` | no | `odigos&odigos-enterprise&vm-agent` | `&`-separated consumer repos to dispatch to (commas/spaces/newlines also accepted). Valid: `odigos`, `odigos-enterprise`, `vm-agent`. |
 
 ## Notes
 
-- The instrumentation repo must be trusted by each targeted consumer's
-  `trigger-agent-version-updater` octo-sts identity.
+- The instrumentation repo must be trusted by each targeted consumer's STS dispatch identity.
 - Broadcasting to a consumer that doesn't pin this instrumentation is safe: its `upgrade-agent`
-  make target no-ops on unknown instrumentations. (Still, set `consumers` to the repos that
-  actually consume it so an STS-untrusted consumer isn't dispatched to.)
-- This action does not post to Slack — the instrumentation's own release workflow already
-  notifies on publish, and the consumer-side `apply-agent-version-update` posts the PR link.
+  make target no-ops on unknown values. Still, set `consumers` to the repos that actually consume
+  it so an untrusted consumer isn't dispatched to.
+- This action does not post to Slack — the consumer-side `apply-agent-version-update` posts the PR link.

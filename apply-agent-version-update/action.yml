@@ -39,10 +39,13 @@ runs:
     - name: Detect changes
       id: diff
       shell: bash
+      env:
+        INSTRUMENTATION_AGENT: ${{ inputs.instrumentation_agent }}
+        AGENT_VERSION: ${{ inputs.version }}
       run: |
         if [ -z "$(git status --porcelain)" ]; then
           echo "changed=false" >> "$GITHUB_OUTPUT"
-          echo "No changes produced for ${{ inputs.instrumentation_agent }} -> ${{ inputs.version }} (instrumentation not consumed here, or already up to date)."
+          echo "No changes produced for $INSTRUMENTATION_AGENT -> $AGENT_VERSION (instrumentation not consumed here, or already up to date)."
         else
           echo "changed=true" >> "$GITHUB_OUTPUT"
         fi
