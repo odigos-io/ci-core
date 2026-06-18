@@ -5,7 +5,7 @@ description: |
   auto-merging PR and notify Slack.
 inputs:
   instrumentation_agent:
-    description: "Language instrumentation to update (e.g. php, java-ebpf, golang)"
+    description: "Language instrumentation to update (e.g. php, java-ebpf, golang, cpp)"
     required: true
   version:
     description: "Version to set (e.g. v0.11.0)"
