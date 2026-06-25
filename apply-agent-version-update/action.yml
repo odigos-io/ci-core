@@ -1,0 +1,98 @@
+name: "Apply Agent Version Update"
+description: |
+  Shared consumer-side logic for an instrumentation-agent version bump: run the
+  repo's `upgrade-agent` make target, then (if anything changed) open an
+  auto-merging PR and notify Slack.
+inputs:
+  instrumentation_agent:
+    description: "Language instrumentation to update (e.g. php, java-ebpf, golang, cpp)"
+    required: true
+  version:
+    description: "Version to set (e.g. v0.11.0)"
+    required: true
+  make_dir:
+    description: "Directory containing the repo's agent-deps.mk to run `make` in (e.g. odiglet, or . for repo root)"
+    required: false
+    default: "."
+  webhook-url:
+    description: "Slack webhook URL for the release status notification"
+    required: true
+  automerge:
+    description: "Enable auto-merge on the created PR"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Update agent version
+      shell: bash
+      working-directory: ${{ inputs.make_dir }}
+      env:
+        INSTRUMENTATION_AGENT: ${{ inputs.instrumentation_agent }}
+        AGENT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        make -f agent-deps.mk upgrade-agent \
+          INSTRUMENTATION_AGENT="$INSTRUMENTATION_AGENT" AGENT_VERSION="$AGENT_VERSION"
+
+    - name: Detect changes
+      id: diff
+      shell: bash
+      env:
+        INSTRUMENTATION_AGENT: ${{ inputs.instrumentation_agent }}
+        AGENT_VERSION: ${{ inputs.version }}
+      run: |
+        if [ -z "$(git status --porcelain)" ]; then
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "No changes produced for $INSTRUMENTATION_AGENT -> $AGENT_VERSION (instrumentation not consumed here, or already up to date)."
+        else
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Get agent version updater token
+      if: ${{ steps.diff.outputs.changed == 'true' }}
+      id: agent-version-sts
+      uses: odigos-io/ci-core/sts@main
+      with:
+        scope: ${{ github.repository }}
+        identity: agent-version-updater
+        output-git-config: "false"
+
+    - name: Create pull request
+      if: ${{ steps.diff.outputs.changed == 'true' }}
+      id: cpr
+      uses: peter-evans/create-pull-request@v8
+      with:
+        token: ${{ steps.agent-version-sts.outputs.GH_TOKEN }}
+        branch: update-${{ inputs.instrumentation_agent }}-agents-version-${{ inputs.version }}
+        title: "chore: update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}"
+        body: |
+          Automated update of the **${{ inputs.instrumentation_agent }}** instrumentation agent to `${{ inputs.version }}`
+          (Dockerfile image tags and/or go.mod, as applicable for this repo).
+
+          **Triggered by:** ${{ github.event_name }}
+        commit-message: "chore: update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}"
+        delete-branch: true
+        sign-commits: true
+        labels: |
+          new-agent-version
+          release-bot
+
+    - name: Enable Pull Request Automerge
+      if: ${{ steps.diff.outputs.changed == 'true' && inputs.automerge == 'true' && steps.cpr.outputs.pull-request-operation == 'created' }}
+      uses: peter-evans/enable-pull-request-automerge@v3
+      with:
+        token: ${{ steps.agent-version-sts.outputs.GH_TOKEN }}
+        pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+        merge-method: squash
+
+    - name: Notify Slack
+      if: ${{ always() && (steps.cpr.outputs.pull-request-number != '' || job.status == 'failure') }}
+      uses: odigos-io/ci-core/.github/actions/slack-release-notification@main
+      with:
+        webhook-url: ${{ inputs.webhook-url }}
+        success-description: "Created PR to update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}. Please review: ${{ steps.cpr.outputs.pull-request-url }}"
+        failure-description: "ERROR: Failed to update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}"
+        tag: ${{ inputs.version }}
+        release-pr-link: ${{ steps.cpr.outputs.pull-request-url }}
