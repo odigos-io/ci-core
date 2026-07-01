@@ -98,7 +98,7 @@ jobs:
 
 - **Workflow artifact:** The action always uploads a `release-notes` artifact containing the full `release-notes.md`, so other jobs can download it.
 - **Release body:** Unless `dry-run` is `true`, the action updates the GitHub release for `tag` with the generated notes.
-- **Truncation:** If the notes exceed GitHub’s limit (~124k chars), the release body is truncated and a note is appended. The **full** `release-notes.md` is still in the artifact and is also attached to the release as a `release-notes.md` asset when truncated.
+- **Truncation:** If the notes exceed GitHub’s limit (~124k chars), the release body is truncated and a note is appended. The **full** `release-notes.md` is still in the artifact and is also attached to the release as a `release-notes.md` asset when truncated (skipped if the file is empty — GitHub rejects zero-byte assets).
 
 ### How the commit range is chosen
 
