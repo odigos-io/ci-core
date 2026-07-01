@@ -74,6 +74,11 @@ runs:
           END_SHA=$(git rev-parse HEAD)
           echo "end_sha=${END_SHA}" >> $GITHUB_OUTPUT
 
+          # Peel annotated/signed tags to the commit they point at. Plain rev-parse
+          # returns the tag object SHA for annotated tags, which the release-notes
+          # tool cannot resolve via the GitHub commits API.
+          tag_commit_sha() { git rev-parse "${1}^{commit}"; }
+
           # Only consider exact semver release tags (vX.Y.Z or vX.Y.Z-rcN), not namespaced ones like profiles/v1.17.0
           is_release_tag() { [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; }
           list_merged_release_tags() {
@@ -102,7 +107,7 @@ runs:
             done < <(list_merged_release_tags)
 
             if [ -n "$PREV_RC_TAG" ]; then
-              START_SHA=$(git rev-parse "$PREV_RC_TAG")
+              START_SHA=$(tag_commit_sha "$PREV_RC_TAG")
               echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
               echo "Scenario: RC after previous RC, PREV_RC_TAG=$PREV_RC_TAG"
             else
@@ -143,7 +148,7 @@ runs:
             done
 
             if [ -n "$PREV_STABLE_TAG" ]; then
-              START_SHA=$(git rev-parse "$PREV_STABLE_TAG")
+              START_SHA=$(tag_commit_sha "$PREV_STABLE_TAG")
               echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
               echo "Scenario: patch release, PREV_STABLE_TAG=$PREV_STABLE_TAG"
             else

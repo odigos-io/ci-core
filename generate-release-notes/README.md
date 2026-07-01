@@ -112,6 +112,8 @@ The action picks `START_SHA` (and uses `END_SHA` = the tag commit) based on the 
 
 Only exact semver tags (`vX.Y.Z` or `vX.Y.Z-rcN`) are considered; namespaced tags like `profiles/v1.17.0` are ignored.
 
+Previous tags are resolved to their **commit** SHA (`tag^{commit}`), so annotated or GPG-signed tags work the same as lightweight tags when computing `START_SHA`.
+
 ## Local testing with act
 
 You can run the workflow locally with [act](https://github.com/nektos/act). From the repo that uses the action (e.g. `odigos-io/odigos`):
