@@ -98,7 +98,7 @@ jobs:
 
 - **Workflow artifact:** The action always uploads a `release-notes` artifact containing the full `release-notes.md`, so other jobs can download it.
 - **Release body:** Unless `dry-run` is `true`, the action updates the GitHub release for `tag` with the generated notes.
-- **Truncation:** If the notes exceed GitHub’s limit (~124k chars), the release body is truncated and a note is appended. The **full** `release-notes.md` is still in the artifact and is also attached to the release as a `release-notes.md` asset when truncated.
+- **Truncation:** If the notes exceed GitHub’s limit (~124k chars), the release body is truncated and a note is appended. The **full** `release-notes.md` is still in the artifact and is also attached to the release as a `release-notes.md` asset when truncated (skipped if the file is empty — GitHub rejects zero-byte assets).
 
 ### How the commit range is chosen
 
@@ -111,6 +111,8 @@ The action picks `START_SHA` (and uses `END_SHA` = the tag commit) based on the 
 - **Stable patch `vX.Y.Z` (Z ≥ 1):** Range is from the previous stable tag in the same minor (e.g. `v1.19.0` for `v1.19.1`). If none exists, fallback is merge-base of `main` and the tag.
 
 Only exact semver tags (`vX.Y.Z` or `vX.Y.Z-rcN`) are considered; namespaced tags like `profiles/v1.17.0` are ignored.
+
+Previous tags are resolved to their **commit** SHA (`tag^{commit}`), so annotated or GPG-signed tags work the same as lightweight tags when computing `START_SHA`.
 
 ## Local testing with act
 
