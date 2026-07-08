@@ -25,5 +25,5 @@ Ensures pull requests have a linked Linear issue before merging. Automatically s
 
 | Input | Required | Default |
 |-------|----------|---------|
-| `linear-prefix-regex` | No | `"(CORE-\|PLAT-\|PRD-\|RUN-\|GEN-\|DEVOPS-\|SEC-)"` |
+| `linear-prefix-regex` | No | `"(CORE-\|PLAT-\|PRD-\|RUN-\|GEN-\|DEVOPS-\|SEC-)"` (issue number must be > 0) |
 | `bot-accounts-json` | No | `["dependabot[bot]","renovate[bot]","odigos-bot","github-actions[bot]","keyval-release-bot"]` |
