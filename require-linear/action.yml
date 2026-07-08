@@ -3,7 +3,7 @@ description: Ensures pull requests have a linked Linear issue before merging
 
 inputs:
   linear-prefix-regex:
-    description: "Regex matching allowed Linear team prefixes (include trailing dash each)"
+    description: "Regex matching allowed Linear team prefixes (include trailing dash each). Issue number must be a valid existing Linear ticket."
     required: false
     default: "(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)"
   bot-accounts-json:
@@ -23,5 +23,5 @@ runs:
       if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
       uses: copilotmoney/linear-pr-check@de6d3f5b53dccbb18f782506fbdb8fba0456bce5
       with:
-        prefix: ${{ inputs.linear-prefix-regex }}
+        prefix: ${{ format('{0}(?=[1-9]\\d*)', inputs.linear-prefix-regex) }}
         github_token: ${{ github.token }}
