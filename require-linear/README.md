@@ -1,10 +1,9 @@
 # Require Linked Linear Issue
 
-Ensures pull requests have a linked Linear issue before merging. Automatically skips bot accounts.
+Ensures pull requests reference a Linear issue in the PR title, body, or branch name before merging. Automatically skips bot accounts.
 
 ## Permission Requirements
-* `pull_requests: read` - To read pull request details and linked issues.
-* `statuses: write` - To set the status check on the pull request.
+* `pull_requests: read` - To read pull request title, body, and branch name.
 
 ## Usage
 
@@ -12,18 +11,6 @@ Ensures pull requests have a linked Linear issue before merging. Automatically s
 - uses: odigos-io/ci-core/require-linear@main
 ```
 
-### Custom Configuration
+The check matches (case-insensitive) an allowed Linear team prefix followed by an issue number that does not start with `0`: `(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)[1-9][0-9]*`.
 
-```yaml
-- uses: odigos-io/ci-core/require-linear@main
-  with:
-    linear-prefix-regex: "(TEAM-|PROJ-)"
-    bot-accounts-json: '["dependabot[bot]","custom-bot"]'
-```
-
-## Inputs
-
-| Input | Required | Default |
-|-------|----------|---------|
-| `linear-prefix-regex` | No | `"(CORE-\|PLAT-\|PRD-\|RUN-\|GEN-\|DEVOPS-\|SEC-)"` (issue number must be > 0) |
-| `bot-accounts-json` | No | `["dependabot[bot]","renovate[bot]","odigos-bot","github-actions[bot]","keyval-release-bot"]` |
+Bot accounts (`dependabot[bot]`, `renovate[bot]`, `odigos-bot`, `github-actions[bot]`, `keyval-release-bot`) and any PR opened by a Bot user are skipped. The allowed prefixes and skipped accounts are hardcoded in `action.yml`.

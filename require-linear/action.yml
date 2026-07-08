@@ -1,27 +1,68 @@
 name: Require Linked Linear Issue
-description: Ensures pull requests have a linked Linear issue before merging
-
-inputs:
-  linear-prefix-regex:
-    description: "Regex matching allowed Linear team prefixes (include trailing dash each). Issue number must be a valid existing Linear ticket."
-    required: false
-    default: "(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)"
-  bot-accounts-json:
-    description: "JSON array of GitHub usernames to skip check for"
-    required: false
-    default: '["dependabot[bot]","renovate[bot]","odigos-bot","github-actions[bot]","keyval-release-bot"]'
+description: Ensures pull requests reference a Linear issue in the PR title, body, or branch name before merging
 
 runs:
   using: composite
   steps:
     - name: Skip Linear check for bots
+      id: bots
       shell: bash
-      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
-      run: echo "PR opened by ${{ github.event.pull_request.user.login }} - Linear check skipped."
+      env:
+        PR_USER: ${{ github.event.pull_request.user.login }}
+        PR_USER_TYPE: ${{ github.event.pull_request.user.type }}
+      run: |
+        set -euo pipefail
+
+        BOT_ACCOUNTS=(
+          "dependabot[bot]"
+          "renovate[bot]"
+          "odigos-bot"
+          "github-actions[bot]"
+          "keyval-release-bot"
+        )
+
+        if [ "$PR_USER_TYPE" = "Bot" ]; then
+          echo "PR opened by bot user $PR_USER - Linear check skipped."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        for bot in "${BOT_ACCOUNTS[@]}"; do
+          if [ "$PR_USER" = "$bot" ]; then
+            echo "PR opened by $PR_USER - Linear check skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done
 
     - name: Ensure PR links a Linear issue
-      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
-      uses: copilotmoney/linear-pr-check@de6d3f5b53dccbb18f782506fbdb8fba0456bce5
-      with:
-        prefix: ${{ format('{0}(?=[1-9]\\d*)', inputs.linear-prefix-regex) }}
-        github_token: ${{ github.token }}
+      if: ${{ steps.bots.outputs.skip != 'true' }}
+      shell: bash
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+      run: |
+        set -euo pipefail
+
+        # Same case-insensitive pattern for title, body, and branch.
+        # Prefix must be an allowed Linear team; issue number must not start with 0.
+        PATTERN="(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)[1-9][0-9]*"
+
+        if printf '%s\n' "$PR_TITLE" | grep -qiE "$PATTERN"; then
+          echo "✅ Linear issue reference found in PR title"
+          exit 0
+        fi
+
+        if printf '%s\n' "$PR_BODY" | grep -qiE "$PATTERN"; then
+          echo "✅ Linear issue reference found in PR body"
+          exit 0
+        fi
+
+        if printf '%s\n' "$PR_BRANCH" | grep -qiE "$PATTERN"; then
+          echo "✅ Linear issue reference found in branch name"
+          exit 0
+        fi
+
+        echo "❌ No Linear issue reference found in PR title, body, or branch"
+        echo "Include an issue ID in the PR title, body (e.g. Fixes CORE-123), or branch name."
+        exit 1
