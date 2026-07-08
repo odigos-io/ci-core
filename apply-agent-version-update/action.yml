@@ -92,7 +92,7 @@ runs:
       uses: odigos-io/ci-core/.github/actions/slack-release-notification@main
       with:
         webhook-url: ${{ inputs.webhook-url }}
-        success-description: "Created PR to update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}. Please review: ${{ steps.cpr.outputs.pull-request-url }}"
+        success-description: "Created PR to update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}."
         failure-description: "ERROR: Failed to update ${{ inputs.instrumentation_agent }} version to ${{ inputs.version }}"
         tag: ${{ inputs.version }}
         release-pr-link: ${{ steps.cpr.outputs.pull-request-url }}
