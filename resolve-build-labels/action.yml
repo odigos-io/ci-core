@@ -1,0 +1,63 @@
+name: "Resolve Build Labels"
+description: |
+  Reads pull request labels to decide Docker build options.
+  Supported labels: "build: arm" (also build linux/arm64) and "build: no-cache"
+  (build without Docker layer cache). Defaults to linux/amd64 with cache enabled.
+
+outputs:
+  build-arm:
+    description: "true if the PR has the 'build: arm' label"
+    value: ${{ steps.resolve.outputs.build-arm }}
+  no-cache:
+    description: "true if the PR has the 'build: no-cache' label"
+    value: ${{ steps.resolve.outputs.no-cache }}
+  platforms:
+    description: "Docker platforms string (linux/amd64 or linux/amd64,linux/arm64)"
+    value: ${{ steps.resolve.outputs.platforms }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build options from PR labels
+      id: resolve
+      shell: bash
+      env:
+        # Comma-joined label names; empty outside pull_request events.
+        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      run: |
+        set -euo pipefail
+
+        BUILD_ARM=false
+        NO_CACHE=false
+
+        IFS=',' read -ra LABELS <<< "${PR_LABELS}"
+        for label in "${LABELS[@]}"; do
+          case "$label" in
+            "build: arm")
+              BUILD_ARM=true
+              ;;
+            "build: no-cache")
+              NO_CACHE=true
+              ;;
+          esac
+        done
+
+        if [ "$BUILD_ARM" = true ]; then
+          PLATFORMS="linux/amd64,linux/arm64"
+        else
+          PLATFORMS="linux/amd64"
+        fi
+
+        echo "build-arm=${BUILD_ARM}" >> "$GITHUB_OUTPUT"
+        echo "no-cache=${NO_CACHE}" >> "$GITHUB_OUTPUT"
+        echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
+
+        echo "## Build options from PR labels" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Option | Value | Label |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|--------|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Platforms | \`${PLATFORMS}\` | \`build: arm\` → ${BUILD_ARM} |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| No cache | \`${NO_CACHE}\` | \`build: no-cache\` → ${NO_CACHE} |" >> "$GITHUB_STEP_SUMMARY"
+
+        echo "Platforms: ${PLATFORMS}"
+        echo "No cache: ${NO_CACHE}"
