@@ -10,14 +10,34 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Skip when the event carries no pull request
+      id: context
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+
+        # merge_group runs against a gh-readonly-queue ref and carries no pull request
+        # payload, so the body reads as empty, the release-note block is never found and
+        # the check fails. The policy is enforced on the pull_request events that run
+        # before the queue.
+        case "$EVENT_NAME" in
+          pull_request|pull_request_target) ;;
+          *)
+            echo "Event $EVENT_NAME carries no pull request - release note check skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            ;;
+        esac
+
     - name: Skip release note check for bots
       shell: bash
-      if: ${{ github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
+      if: ${{ steps.context.outputs.skip != 'true' && (github.event.pull_request.user.type == 'Bot' || contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login)) }}
       run: echo "PR opened by ${{ github.event.pull_request.user.login }} - release note check skipped."
 
     - name: Check release note block
       shell: bash
-      if: ${{ github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
+      if: ${{ steps.context.outputs.skip != 'true' && github.event.pull_request.user.type != 'Bot' && !contains(fromJson(inputs.bot-accounts-json), github.event.pull_request.user.login) }}
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
