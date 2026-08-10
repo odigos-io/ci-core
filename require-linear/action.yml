@@ -4,8 +4,29 @@ description: Ensures pull requests reference a Linear issue in the PR title, bod
 runs:
   using: composite
   steps:
+    - name: Skip when the event carries no pull request
+      id: context
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+
+        # merge_group runs against a gh-readonly-queue ref and carries no pull request
+        # payload, so title, body and branch all read as empty. Without this the pattern
+        # matches nothing and the check fails every queue entry instead of passing it.
+        # The policy is enforced on the pull_request events that run before the queue.
+        case "$EVENT_NAME" in
+          pull_request|pull_request_target) ;;
+          *)
+            echo "Event $EVENT_NAME carries no pull request - Linear check skipped."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            ;;
+        esac
+
     - name: Skip Linear check for bots
       id: bots
+      if: ${{ steps.context.outputs.skip != 'true' }}
       shell: bash
       env:
         PR_USER: ${{ github.event.pull_request.user.login }}
@@ -35,7 +56,7 @@ runs:
         done
 
     - name: Ensure PR links a Linear issue
-      if: ${{ steps.bots.outputs.skip != 'true' }}
+      if: ${{ steps.context.outputs.skip != 'true' && steps.bots.outputs.skip != 'true' }}
       shell: bash
       env:
         PR_TITLE: ${{ github.event.pull_request.title }}
