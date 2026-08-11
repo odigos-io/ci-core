@@ -1,0 +1,179 @@
+name: "Sign OCI Image (Cosign)"
+description: "Keyless-sign a pushed image by digest and attach an SBOM attestation. Signs every registry the digest was pushed to."
+
+# Must run in the SAME job as the push — it relies on the docker keychain the
+# caller already established. The calling JOB needs `permissions: id-token: write`
+# (composite actions cannot declare their own), plus `packages: write` for ghcr.io.
+#
+#   - id: build
+#     uses: docker/build-push-action@...
+#   - uses: odigos-io/ci-core/sign-oci@<sha>
+#     with:
+#       refs: us-central1-docker.pkg.dev/odigos-cloud/components/foo
+#       digest: ${{ steps.build.outputs.digest }}
+
+inputs:
+  refs:
+    description: >
+      Whitespace/newline-separated registry paths WITHOUT a tag or digest. Pass
+      every registry the digest went to — a signature lives beside the image in
+      one registry and does not travel with a copy.
+    required: true
+  digest:
+    description: "Image digest to sign. Use steps.<build>.outputs.digest."
+    required: true
+  recursive:
+    description: >
+      Sign child manifests as well as the index. Default true: everything here is
+      multi-arch and some consumers (COPY --from, crane pull --platform) resolve a
+      child rather than the index.
+    required: false
+    default: "true"
+  sbom:
+    description: "Generate an SBOM and attach it as an attestation."
+    required: false
+    default: "true"
+  sbom-type:
+    description: "cyclonedx or spdxjson."
+    required: false
+    default: "cyclonedx"
+  cosign-version:
+    description: "Pinned cosign version, no leading 'v'."
+    required: false
+    default: "3.1.2"
+  syft-version:
+    description: "Pinned syft version, no leading 'v'."
+    required: false
+    default: "1.50.0"
+  dry-run:
+    description: "Sign without uploading signatures or attestations."
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      id: v
+      shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+        DIGEST: ${{ inputs.digest }}
+        SBOM_TYPE: ${{ inputs.sbom-type }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+          echo "::error::digest must be sha256:<64 hex>, got '$DIGEST'. Add an 'id:' to the build step and pass steps.<id>.outputs.digest."
+          exit 1
+        fi
+
+        # Newlines/CR to spaces, then word-split: drops blanks and indentation.
+        read -ra LIST <<< "$(tr '\n\r' '  ' <<< "$REFS")"
+        (( ${#LIST[@]} )) || { echo "::error::refs is empty."; exit 1; }
+
+        for ref in "${LIST[@]}"; do
+          # Only the last path segment can carry a tag; an earlier colon is a
+          # registry port and is legitimate.
+          if [[ "${ref##*/}" == *[:@]* ]]; then
+            echo "::error::refs must not contain a tag or digest, got '$ref'. Signing a mutable tag is a TOCTOU hole; pass the bare repository path."
+            exit 1
+          fi
+        done
+
+        case "$SBOM_TYPE" in
+          cyclonedx) echo "syft-format=cyclonedx-json" >> "$GITHUB_OUTPUT" ;;
+          spdxjson)  echo "syft-format=spdx-json"      >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::sbom-type must be cyclonedx or spdxjson, got '$SBOM_TYPE'."; exit 1 ;;
+        esac
+
+        echo "refs=${LIST[*]}"   >> "$GITHUB_OUTPUT"
+        echo "first=${LIST[0]}"  >> "$GITHUB_OUTPUT"
+
+    # Not a curl wrapper: pins a bootstrap cosign by SHA in its own SHA-pinned
+    # source, then uses it to `cosign verify-blob` the requested release. Also
+    # selects by runner.arch, which matters — the org runs arm64 release jobs.
+    # The leading 'v' is mandatory; a bare "3.1.2" fails its internal regex.
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: v${{ inputs.cosign-version }}
+
+    # Reads the digest straight from the registry using the caller's docker
+    # login. upload-artifact and upload-release-assets both default to TRUE and
+    # are disabled here — otherwise this would attach SBOMs to GitHub releases.
+    - name: Generate SBOM
+      if: ${{ inputs.sbom == 'true' }}
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      with:
+        image: ${{ steps.v.outputs.first }}@${{ inputs.digest }}
+        format: ${{ steps.v.outputs.syft-format }}
+        output-file: sbom.json
+        syft-version: v${{ inputs.syft-version }}
+        upload-artifact: false
+        upload-release-assets: false
+
+    # Per-ref rather than `cosign sign ref1@d ref2@d ...`. Batching works, but
+    # cosign mints a fresh Fulcio cert and Rekor entry per ref either way, so the
+    # only difference is that a batch failure names the whole argument list
+    # instead of the ref that failed.
+    - name: Sign and attest
+      shell: bash
+      env:
+        REFS: ${{ steps.v.outputs.refs }}
+        DIGEST: ${{ inputs.digest }}
+        RECURSIVE: ${{ inputs.recursive }}
+        SBOM: ${{ inputs.sbom }}
+        SBOM_TYPE: ${{ inputs.sbom-type }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+
+        # Signing is fail-closed: an exhausted retry fails the publish job.
+        # The retry absorbs transient Fulcio/Rekor/registry blips so a
+        # seconds-long outage does not force anyone to reach for break-glass.
+        # Note `cosign sign` is not idempotent — a retry after a partial
+        # success can append a duplicate signature. That is harmless for
+        # verification (any one matching signature passes).
+        retry() {
+          local attempt=1 max=3 delay=5
+          until "$@"; do
+            if [[ $attempt -ge $max ]]; then
+              echo "::error::failed after ${max} attempts: $*"
+              return 1
+            fi
+            echo "::warning::attempt ${attempt} failed: $* — retrying in ${delay}s"
+            sleep "$delay"
+            delay=$((delay * 3))
+            attempt=$((attempt + 1))
+          done
+        }
+
+        SIGN=(cosign sign --yes)
+        if [[ "$RECURSIVE" == "true" ]]; then SIGN+=(--recursive); fi
+
+        # `cosign attest` has no --recursive; the attestation attaches to the
+        # index digest, the correct subject for an image-level SBOM. Note the
+        # SBOM itself describes one platform — syft resolves a single child of a
+        # multi-arch index. Per-platform SBOMs are tracked separately.
+        ATTEST=(cosign attest --yes --type "$SBOM_TYPE" --predicate sbom.json)
+
+        # cosign 3.x refuses to skip the registry upload unless it is given
+        # somewhere else to put the material: "--upload=false" and "--no-upload"
+        # both error without a local --bundle. A dry run therefore still mints a
+        # real Fulcio cert and signs — it just writes the bundle to disk instead
+        # of pushing it. (There is no --tlog-upload escape hatch under the
+        # default --use-signing-config.)
+        if [[ "$DRY_RUN" == "true" ]]; then
+          BUNDLE_DIR="$(mktemp -d)"
+          SIGN+=(--upload=false --bundle "${BUNDLE_DIR}/sign.bundle")
+          ATTEST+=(--no-upload --bundle "${BUNDLE_DIR}/attest.bundle")
+        fi
+
+        # shellcheck disable=SC2086 -- validated, whitespace-free list.
+        for ref in $REFS; do
+          echo "::group::$ref"
+          retry "${SIGN[@]}" "${ref}@${DIGEST}"
+          if [[ "$SBOM" == "true" ]]; then retry "${ATTEST[@]}" "${ref}@${DIGEST}"; fi
+          echo "::endgroup::"
+        done

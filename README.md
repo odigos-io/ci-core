@@ -16,8 +16,9 @@
 ### Build Configuration
 1. [resolve-build-labels](./resolve-build-labels/README.md)
 
-### Security and Vulnerability Scanning
+### Security and Supply Chain
 1. [vulnerabilities-scanner](./vulnerabilities-scanner/README.md)
+2. [sign-oci](./sign-oci/README.md) — keyless cosign signing and SBOM attestation for published images
 
 ### Release Management
 1. [tag-and-release](./tag-and-release/README.md)
