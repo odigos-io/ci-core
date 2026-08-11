@@ -1,0 +1,124 @@
+name: Signature Drift Check
+
+# The dangerous signing failures are quiet: a copy that drops referrers, a
+# workflow someone edited, a break-glass release nobody backfilled. A green
+# release does not prove a signature exists. This walks recent tags of every
+# artifact in verification-policy.yaml and asserts each one carries a cosign
+# signature, so a silent regression surfaces within a day instead of when a
+# customer tries to verify.
+#
+# Only artifacts with a non-null `floor` are checked — tags older than the
+# floor are unsigned history, and artifacts with `floor: null` have not
+# started signing yet. Handles both signature layouts (OCI referrers API on
+# GAR, fallback tag schema on GHCR) by asking cosign, never by globbing for
+# .sig tags.
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # daily, off the top of the hour
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  TAGS_TO_CHECK: "5" # most recent N tags per ref, newest first, floor-filtered
+  COSIGN_VERSION: "3.1.2"
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Check recent tags for missing signatures
+        id: check
+        run: |
+          set -uo pipefail
+
+          FAILED=""
+          SKIPPED=""
+          CHECKED=0
+
+          # Pull (name, floor, ref) triples out of the policy. Templated refs
+          # (<service>) are expanded from the services list.
+          # A policy parse failure must fail the check, not silently pass it.
+          ROWS_RAW=$(yq -r '
+            .artifacts[]
+            | select(.floor != null)
+            | .name as $n | .floor as $fl
+            | (.services // [null])[] as $svc
+            | .refs[]
+            | [$n, $fl, (. | sub("<service>", ($svc // "")))]
+            | @tsv' verification-policy.yaml) || {
+              echo "::error::failed to parse verification-policy.yaml"; exit 1; }
+          mapfile -t ROWS <<< "$ROWS_RAW"
+
+          if [ "${#ROWS[@]}" -eq 0 ]; then
+            echo "No artifacts have a signing floor set yet — nothing to check." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          for row in "${ROWS[@]}"; do
+            IFS=$'\t' read -r name floor ref <<< "$row"
+            # Private registries need auth this job does not have; check the
+            # public copies, which are what customers verify anyway.
+            case "$ref" in
+              *components-private*) SKIPPED="${SKIPPED}${ref} (private)\n"; continue ;;
+            esac
+
+            # Newest N version tags at or above the floor. sort -V puts the
+            # floor in order with the tags; everything after it qualifies.
+            tags=$(crane ls "$ref" 2>/dev/null \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' \
+              | sort -V \
+              | awk -v fl="$floor" '$0==fl{f=1} f{print}' \
+              | tail -n "$TAGS_TO_CHECK")
+            if [ -z "$tags" ]; then
+              SKIPPED="${SKIPPED}${ref} (no tags above floor ${floor})\n"
+              continue
+            fi
+
+            for tag in $tags; do
+              digest=$(crane digest "${ref}:${tag}" 2>/dev/null) || {
+                FAILED="${FAILED}${ref}:${tag} (digest unresolvable)\n"; continue; }
+              CHECKED=$((CHECKED + 1))
+              if cosign tree "${ref}@${digest}" 2>/dev/null | grep -q 'cosign/sign'; then
+                echo "ok   ${ref}:${tag}"
+              else
+                echo "MISS ${ref}:${tag} @${digest}"
+                FAILED="${FAILED}${ref}:${tag} @${digest}\n"
+              fi
+            done
+          done
+
+          {
+            echo "## Signature drift check"
+            echo
+            echo "- refs checked: ${CHECKED}"
+            if [ -n "$SKIPPED" ]; then echo "### Skipped"; printf '%b' "$SKIPPED" | sed 's/^/- /'; fi
+            if [ -n "$FAILED" ]; then echo "### MISSING SIGNATURES"; printf '%b' "$FAILED" | sed 's/^/- /'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$FAILED" ]; then
+            printf 'missing<<EOF\n%b\nEOF\n' "$FAILED" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Notify Slack on drift
+        if: failure()
+        uses: odigos-io/ci-core/.github/actions/slack-release-notification@main
+        with:
+          webhook-url: ${{ secrets.ODIGOS_RELEASE_STATUS_WEBHOOK_URL }}
+          success-description: "unused"
+          failure-description: "Signature drift check found published tags with NO cosign signature — see the run summary"
+          tag: drift-check

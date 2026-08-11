@@ -1,0 +1,109 @@
+# Odigos signing verification policy.
+#
+# Machine-readable source of truth for HOW to verify every signed odigos
+# artifact: which OIDC identity signs it, where the signature lives, and from
+# which version signatures exist at all. Consumed by the signature-drift-check
+# workflow and by verification docs; customers verify with:
+#
+#   cosign verify \
+#     --certificate-oidc-issuer <issuer> \
+#     --certificate-identity-regexp '<identity>' \
+#     <ref>@<digest>
+#
+# Notes that shape the entries below:
+# - Identity is per repo AND per workflow, never a broad org pattern. A
+#   blanket `.*odigos-io.*` would accept a signature minted by any workflow
+#   in any org repo, including PR CI.
+# - dispatch-triggered workflows sign under refs/heads/<branch>; tag-triggered
+#   ones under refs/tags/<tag>. Some artifacts legitimately have both.
+# - Stable x.y.0 component images are same-repo retags of the RC digest, so
+#   they verify against the RC-tagged identity. That is correct, not a bug.
+# - `floor` is the first version from which signatures exist. Tags older than
+#   the floor are unsigned history. `floor: null` means signing has not
+#   shipped for this artifact yet — the drift check skips it.
+
+issuer: https://token.actions.githubusercontent.com
+sbom_type: cyclonedx
+
+# Every artifact below ALSO accepts this identity: signatures produced by the
+# break-glass backfill workflow (ci-core/backfill-sign.yml), which signs
+# already-published digests after an outage forced an unsigned release. The
+# distinct identity keeps backfills auditable — a release-time signature and a
+# backfill are never confusable.
+backfill_identity: '^https://github\.com/odigos-io/ci-core/\.github/workflows/backfill-sign\.yml@refs/heads/main$'
+
+artifacts:
+  - name: wasp-init
+    repo: odigos-io/ebpf-core
+    identity: '^https://github\.com/odigos-io/ebpf-core/\.github/workflows/build-sender\.yml@refs/(heads/main|heads/releases/.*|tags/.*)$'
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/wasp-init
+    floor: null # set when the signing PR merges and the first signed tag ships
+
+  - name: odigos-cli-offsets
+    repo: odigos-io/enterprise-go-instrumentation
+    identity: '^https://github\.com/odigos-io/enterprise-go-instrumentation/\.github/workflows/offsets-push\.yml@refs/heads/.*$'
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-cli-offsets
+    floor: null
+    note: only :latest and :<cli-version>-<sha> tags are published, by design
+
+  - name: odigos-vmagent-instrumentations
+    repo: odigos-io/vm-agent
+    identity: '^https://github\.com/odigos-io/vm-agent/\.github/workflows/publish-agents\.yml@refs/(heads/.*|tags/agents/.*)$'
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-vmagent-instrumentations
+      - us-central1-docker.pkg.dev/odigos-cloud/components-private/odigos-vmagent-instrumentations
+    floor: null
+
+  - name: odigos-components
+    repo: odigos-io/odigos
+    identity: '^https://github\.com/odigos-io/odigos/\.github/workflows/publish-modules\.yml@refs/tags/v.*$'
+    services: [autoscaler, scheduler, instrumentor, collector, odiglet, ui, operator, agents]
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-<service>
+      - us-central1-docker.pkg.dev/odigos-cloud/components-private/odigos-<service>
+      - docker.io/keyval/odigos-<service>
+      - ghcr.io/odigos-io/odigos-<service>
+    floor: null
+    note: >
+      x.y.0 stable tags are retags of the RC digest and verify against the
+      RC tag identity. The components-private mirror receives its signature
+      via `oras copy -r` at promotion.
+
+  - name: odigos-cli-image
+    repo: odigos-io/odigos
+    identity: '^https://github\.com/odigos-io/odigos/\.github/workflows/release\.yml@refs/heads/main$'
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-cli
+      - us-central1-docker.pkg.dev/odigos-cloud/components-private/odigos-cli
+      - docker.io/keyval/odigos-cli
+    floor: null
+    note: >
+      release.yml is dispatch-triggered only, so the certificate ref is
+      refs/heads/main, NOT a tag. Mirrors receive signatures via oras copy -r.
+
+  - name: odigos-victoria-metrics
+    repo: odigos-io/odigos
+    identity: '^https://github\.com/odigos-io/odigos/\.github/workflows/release\.yml@refs/heads/main$'
+    refs:
+      - docker.io/keyval/odigos-victoria-metrics
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-victoria-metrics
+      - us-central1-docker.pkg.dev/odigos-cloud/components-private/odigos-victoria-metrics
+    floor: null
+    note: >
+      RE-HOSTED upstream image. The signature attests that odigos published
+      this exact upstream digest under its name — not that odigos built it.
+
+  - name: odigos-enterprise-components
+    repo: odigos-io/odigos-enterprise
+    identity: '^https://github\.com/odigos-io/odigos-enterprise/\.github/workflows/release-images\.yml@refs/(tags/.*|heads/.*)$'
+    services: [odiglet, instrumentor, ui, collector, central-proxy, central-backend, central-ui, agents,
+               connector-runtime, connector-aws, connector-azure, connector-gcp]
+    refs:
+      - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-enterprise-<service>
+      - us-central1-docker.pkg.dev/odigos-cloud/components-private/odigos-enterprise-<service>
+      - docker.io/keyval/odigos-enterprise-<service>
+      - ghcr.io/odigos-io/odigos-enterprise-<service>
+    floor: null
+    note: odiglet and agents also publish -extended tag variants of separate digests.

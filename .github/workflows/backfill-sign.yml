@@ -1,0 +1,108 @@
+name: Backfill Sign
+
+# Break-glass companion. Signing is fail-closed in every publish job; when
+# Sigstore or a registry is down mid-release, the documented escape is to ship
+# unsigned (deliberately, loudly) and make good afterwards. This workflow is
+# the "make good": it signs an image that is ALREADY in the registry, by
+# digest — cosign signs digests, and a digest does not change when tags are
+# applied or images are copied, so a backfill hours later produces exactly
+# the signature the release would have.
+#
+# Also usable to retroactively sign pre-rollout releases (e.g. the currently
+# deployed pins) before verify-gates go live anywhere.
+
+on:
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: "Registry paths WITHOUT tag/digest, newline-separated (e.g. us-central1-docker.pkg.dev/odigos-cloud/components/odigos-odiglet)"
+        required: true
+        type: string
+      digest:
+        description: "Image digest to sign (sha256:...)"
+        required: true
+        type: string
+      reason:
+        description: "Why this is a backfill (outage link, release tag, ...). Recorded in the run for audit."
+        required: true
+        type: string
+      login-gcp:
+        description: "Authenticate to Artifact Registry (us-central1-docker.pkg.dev)"
+        type: boolean
+        default: true
+      login-dockerhub:
+        description: "Authenticate to Docker Hub"
+        type: boolean
+        default: false
+      login-ghcr:
+        description: "Authenticate to GHCR"
+        type: boolean
+        default: false
+
+permissions: read-all
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Fulcio cert for keyless signing (and GCP WIF when enabled)
+      packages: write   # only exercised when login-ghcr is true
+    steps:
+      - name: Record reason
+        env:
+          REASON: ${{ inputs.reason }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          {
+            echo "## Backfill signing"
+            echo
+            echo "- digest: \`${DIGEST}\`"
+            echo "- reason: ${REASON}"
+            echo "- actor: ${GITHUB_ACTOR}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+
+      - id: gcp-auth
+        name: Authenticate with Google Cloud
+        if: ${{ inputs.login-gcp }}
+        uses: google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5f # v2
+        with:
+          token_format: "access_token"
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          access_token_lifetime: 1200s
+
+      - name: Login to Artifact Registry
+        if: ${{ inputs.login-gcp }}
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp-auth.outputs.access_token }}
+
+      - name: Login to Docker Hub
+        if: ${{ inputs.login-dockerhub }}
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        if: ${{ inputs.login-ghcr }}
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # NOTE: the certificate identity of a backfill is THIS workflow
+      # (backfill-sign.yml), not the original publish workflow. The
+      # verification policy lists it as an accepted identity precisely so
+      # backfills are distinguishable from release-time signatures in audit.
+      - name: Sign
+        uses: ./sign-oci
+        with:
+          refs: ${{ inputs.refs }}
+          digest: ${{ inputs.digest }}
