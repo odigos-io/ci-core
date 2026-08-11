@@ -16,11 +16,37 @@ inputs:
     description: "Verbosity level for the summary (basic or detailed)"
     required: false
     default: "basic"
+  max-inline-bytes:
+    description: >-
+      Upper bound on the size of the results-json output. Reports larger than this are
+      omitted from results-json (it becomes '{}') because Actions cannot expand them in
+      an expression. results-file is unaffected.
+    required: false
+    default: "1000000"
 
 outputs:
   results-json:
-    description: "The raw Grype scan results in JSON format"
+    description: >-
+      The raw Grype scan results in JSON format.
+      Emitted only when the report is small enough to survive an Actions expression
+      (see max-inline-bytes); otherwise this is '{}' and you must use results-file.
+      Prefer results-file, which is always complete.
     value: ${{ steps.process-results.outputs.results-json }}
+  results-file:
+    description: "Path to the raw Grype JSON results file. Always written, at any size."
+    value: ${{ steps.process-results.outputs.results-file }}
+  total-count:
+    description: "Total number of matches found"
+    value: ${{ steps.process-results.outputs.total-count }}
+  critical-count:
+    description: "Number of CRITICAL severity matches"
+    value: ${{ steps.process-results.outputs.critical-count }}
+  high-count:
+    description: "Number of HIGH severity matches"
+    value: ${{ steps.process-results.outputs.high-count }}
+  cutoff-exceeded:
+    description: "'true' when findings at or above severity-cutoff were present. Set even when the step is wrapped in continue-on-error."
+    value: ${{ steps.process-results.outputs.cutoff-exceeded }}
 
 runs:
   using: composite
@@ -31,6 +57,13 @@ runs:
       run: |
         echo "Error: You must provide either 'image' or 'path' input."
         exit 1
+
+    - name: Allocate results file
+      shell: bash
+      run: |
+        # A unique file per invocation: callers routinely run several scans in one
+        # job, and a fixed filename would have each scan overwrite the last.
+        echo "GRYPE_RESULTS_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/grype-results-XXXXXXXX.json")" >> "$GITHUB_ENV"
 
     - name: Install Grype
       shell: bash
@@ -51,7 +84,7 @@ runs:
         grype ${{ inputs.image }} \
           -o json \
           --only-fixed \
-          --file grype-results.json
+          --file "$GRYPE_RESULTS_FILE"
 
     - name: Scan Path for Vulnerabilities
       if: ${{ inputs.path != '' && inputs.image == '' }}
@@ -60,7 +93,7 @@ runs:
         grype dir:${{ inputs.path }} \
           -o json \
           --only-fixed \
-          --file grype-results.json
+          --file "$GRYPE_RESULTS_FILE"
 
     - name: Display in Summary
       if: always()
@@ -69,20 +102,44 @@ runs:
       env:
         SEVERITY_CUTOFF_INPUT: ${{ inputs.severity-cutoff }}
         VERBOSITY: ${{ inputs.verbosity }}
+        MAX_INLINE_BYTES: ${{ inputs.max-inline-bytes }}
       run: |
         set -euo pipefail
 
         echo "## 🔍 Vulnerability Scan Results" >> "$GITHUB_STEP_SUMMARY"
         echo "" >> "$GITHUB_STEP_SUMMARY"
 
-        JSON_FILE="grype-results.json"
-        if [ ! -f "$JSON_FILE" ]; then
+        # This step is if: always(), so it can run even when input validation bailed
+        # out before a results file was ever allocated.
+        JSON_FILE="${GRYPE_RESULTS_FILE:-${RUNNER_TEMP:-/tmp}/grype-results-unallocated.json}"
+        echo "results-file=$JSON_FILE" >> "$GITHUB_OUTPUT"
+
+        # No file means grype never produced a report. Emit an empty-but-valid
+        # document so downstream consumers always have well-formed JSON to read.
+        if [ ! -s "$JSON_FILE" ]; then
+          echo '{"matches":[]}' > "$JSON_FILE"
           echo "✅ No vulnerabilities found!" >> "$GITHUB_STEP_SUMMARY"
-          echo "results-json={}" >> "$GITHUB_OUTPUT"
+          {
+            echo "results-json={}"
+            echo "total-count=0"
+            echo "critical-count=0"
+            echo "high-count=0"
+            echo "cutoff-exceeded=false"
+          } >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
-        echo "results-json=$(jq -c . "$JSON_FILE")" >> "$GITHUB_OUTPUT"
+        # A large report cannot be round-tripped through an Actions expression: the
+        # workflow fails to template with "Maximum object size exceeded" and the
+        # consuming step silently receives an empty string. Skip the inline copy in
+        # that case and let callers read results-file instead.
+        RESULTS_BYTES="$(wc -c < "$JSON_FILE")"
+        if [ "$RESULTS_BYTES" -gt "${MAX_INLINE_BYTES:-1000000}" ]; then
+          echo "::warning::Grype report is ${RESULTS_BYTES} bytes, over the ${MAX_INLINE_BYTES:-1000000} byte inline limit. 'results-json' will be empty — read 'results-file' ($JSON_FILE) instead."
+          echo "results-json={}" >> "$GITHUB_OUTPUT"
+        else
+          echo "results-json=$(jq -c . "$JSON_FILE")" >> "$GITHUB_OUTPUT"
+        fi
 
         SEVERITY_CUTOFF="$(echo "$SEVERITY_CUTOFF_INPUT" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
         VERBOSITY_NORMALIZED="$(echo "${VERBOSITY:-basic}" | tr '[:upper:]' '[:lower:]')"
@@ -94,6 +151,12 @@ runs:
         LOW="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "low")] | length' "$JSON_FILE")"
         NEGLIGIBLE="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "negligible")] | length' "$JSON_FILE")"
         UNKNOWN="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "unknown")] | length' "$JSON_FILE")"
+
+        {
+          echo "total-count=$TOTAL"
+          echo "critical-count=$CRITICAL"
+          echo "high-count=$HIGH"
+        } >> "$GITHUB_OUTPUT"
 
         echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
         echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
@@ -213,6 +276,11 @@ runs:
             SHOULD_FAIL=true
           fi
         fi
+
+        # Recorded as an output as well as an exit code: callers commonly wrap this
+        # action in continue-on-error, which rewrites the step conclusion to success
+        # and would otherwise leave no trace that the cutoff was breached.
+        echo "cutoff-exceeded=$SHOULD_FAIL" >> "$GITHUB_OUTPUT"
 
         if [ "$SHOULD_FAIL" = true ]; then
           exit 1
