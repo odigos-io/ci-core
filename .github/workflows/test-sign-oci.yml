@@ -1,0 +1,284 @@
+name: sign-oci Test
+
+# Exercises sign-oci end to end against a throwaway multi-arch image in GHCR,
+# so the action can be changed without burning a real release.
+#
+# GHCR is used rather than Artifact Registry deliberately: auth is just
+# GITHUB_TOKEN, so this needs no cloud secrets and no IAM prerequisite.
+#
+# The negative assertions are the point. A verify that passes proves very
+# little on its own — what matters is that verification FAILS for the wrong
+# identity, the wrong issuer, and an unsigned digest.
+
+on:
+  pull_request:
+    paths:
+      - 'sign-oci/**'
+      - '.github/workflows/test-sign-oci.yml'
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  TEST_IMAGE: ghcr.io/${{ github.repository_owner }}/ci-core-signing-test
+
+jobs:
+  # Bad input must be rejected before anything is signed. These never reach a
+  # registry — the action's validate step aborts first.
+  input-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject a digest that is not sha256:<64 hex>
+        id: bad-digest
+        continue-on-error: true
+        uses: ./sign-oci
+        with:
+          refs: ghcr.io/odigos-io/nope
+          digest: v1.2.3
+
+      - name: Reject a ref carrying a tag
+        id: tagged-ref
+        continue-on-error: true
+        uses: ./sign-oci
+        with:
+          refs: ghcr.io/odigos-io/nope:v1
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+      - name: Reject empty refs
+        id: empty-refs
+        continue-on-error: true
+        uses: ./sign-oci
+        with:
+          refs: "   "
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+      - name: Reject an unknown sbom-type
+        id: bad-sbom-type
+        continue-on-error: true
+        uses: ./sign-oci
+        with:
+          refs: ghcr.io/odigos-io/nope
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          sbom-type: spdx
+
+      - name: Assert every invalid input was rejected
+        env:
+          BAD_DIGEST: ${{ steps.bad-digest.outcome }}
+          TAGGED_REF: ${{ steps.tagged-ref.outcome }}
+          EMPTY_REFS: ${{ steps.empty-refs.outcome }}
+          BAD_SBOM_TYPE: ${{ steps.bad-sbom-type.outcome }}
+        run: |
+          set -euo pipefail
+          rc=0
+          for case in BAD_DIGEST TAGGED_REF EMPTY_REFS BAD_SBOM_TYPE; do
+            if [[ "${!case}" == "failure" ]]; then
+              echo "ok (correctly rejected): $case"
+            else
+              echo "::error::$case was accepted but should have been rejected (outcome=${!case})"
+              rc=1
+            fi
+          done
+          exit $rc
+
+  sign-and-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push the test image and its signature to GHCR
+      id-token: write   # mint the Fulcio cert for keyless signing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build a throwaway multi-arch image
+        id: build
+        run: |
+          set -euo pipefail
+          ctx="$(mktemp -d)"
+          # Content varies per run so each run gets its own digest.
+          printf 'ci-core sign-oci test %s\n' "${GITHUB_RUN_ID}" > "${ctx}/hello.txt"
+          # A real base image, not FROM scratch: syft needs actual packages to
+          # discover, otherwise the SBOM is an empty document and the
+          # attestation assertion below proves nothing.
+          cat > "${ctx}/Dockerfile" <<'EOF'
+          FROM alpine:3.22
+          COPY hello.txt /hello.txt
+          EOF
+
+          # provenance:false keeps the index to exactly two platform children,
+          # matching how the org publishes today.
+          docker buildx build "$ctx" \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=false \
+            --tag "${TEST_IMAGE}:run-${GITHUB_RUN_ID}" \
+            --metadata-file meta.json \
+            --push
+
+          digest="$(jq -r '.["containerimage.digest"]' meta.json)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::no digest from buildx"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Built ${TEST_IMAGE}@${digest}"
+
+      # ---- dry run: must produce no signature -------------------------------
+
+      - name: Sign with dry-run
+        uses: ./sign-oci
+        with:
+          refs: ${{ env.TEST_IMAGE }}
+          digest: ${{ steps.build.outputs.digest }}
+          dry-run: "true"
+
+      - name: Assert dry-run left the image unsigned
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign version
+          if cosign verify \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity-regexp '.*' \
+              "${TEST_IMAGE}@${DIGEST}" >/dev/null 2>&1; then
+            echo "::error::dry-run uploaded a signature — it must not"
+            exit 1
+          fi
+          echo "ok: no signature present after dry-run"
+
+      # ---- real run ----------------------------------------------------------
+
+      - name: Sign for real
+        uses: ./sign-oci
+        with:
+          refs: ${{ env.TEST_IMAGE }}
+          digest: ${{ steps.build.outputs.digest }}
+
+      - name: Verify signature and SBOM attestation
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          ISSUER=https://token.actions.githubusercontent.com
+          # workflow_dispatch -> refs/heads/<branch>; pull_request -> refs/pull/<n>/merge
+          IDENTITY='^https://github\.com/odigos-io/ci-core/\.github/workflows/test-sign-oci\.yml@refs/(heads|pull)/.*$'
+
+          echo "::group::verify image signature"
+          cosign verify \
+            --certificate-oidc-issuer "$ISSUER" \
+            --certificate-identity-regexp "$IDENTITY" \
+            "${TEST_IMAGE}@${DIGEST}"
+          echo "::endgroup::"
+
+          echo "::group::verify SBOM attestation"
+          cosign verify-attestation --type cyclonedx \
+            --certificate-oidc-issuer "$ISSUER" \
+            --certificate-identity-regexp "$IDENTITY" \
+            "${TEST_IMAGE}@${DIGEST}" > attestation.json
+          # The attestation must carry a real SBOM, not an empty envelope.
+          jq -r '.payload' attestation.json | base64 -d > statement.json
+          predicate_type=$(jq -r '.predicateType' statement.json)
+          components=$(jq '.predicate.components | length // 0' statement.json)
+          echo "predicateType: ${predicate_type}"
+          if [[ "${components:-0}" -le 0 ]]; then
+            echo "::error::SBOM attestation has no components (predicateType=${predicate_type})"
+            jq -c '.predicate | keys' statement.json || true
+            exit 1
+          fi
+          echo "ok: SBOM attestation carries ${components} components"
+          echo "::endgroup::"
+
+      - name: Verify each per-arch child manifest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          ISSUER=https://token.actions.githubusercontent.com
+          IDENTITY='^https://github\.com/odigos-io/ci-core/\.github/workflows/test-sign-oci\.yml@refs/(heads|pull)/.*$'
+
+          # This is the only assertion that proves --recursive did anything.
+          # Consumers that resolve a child directly (COPY --from, crane pull
+          # --platform) depend on these signatures existing.
+          mapfile -t children < <(
+            docker buildx imagetools inspect --raw "${TEST_IMAGE}@${DIGEST}" \
+              | jq -r '.manifests[] | select(.platform.architecture=="amd64" or .platform.architecture=="arm64") | .digest'
+          )
+
+          [[ "${#children[@]}" -eq 2 ]] || { echo "::error::expected 2 platform children, got ${#children[@]}"; exit 1; }
+
+          for child in "${children[@]}"; do
+            echo "verifying child $child"
+            cosign verify \
+              --certificate-oidc-issuer "$ISSUER" \
+              --certificate-identity-regexp "$IDENTITY" \
+              "${TEST_IMAGE}@${child}"
+          done
+          echo "ok: both platform children verify"
+
+      - name: Assert verification fails for the wrong identity
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          ISSUER=https://token.actions.githubusercontent.com
+          GOOD='^https://github\.com/odigos-io/ci-core/\.github/workflows/test-sign-oci\.yml@refs/(heads|pull)/.*$'
+
+          must_fail() {
+            local desc="$1"; shift
+            if "$@" >/dev/null 2>&1; then
+              echo "::error::${desc} — verification SUCCEEDED but must fail"
+              exit 1
+            fi
+            echo "ok (correctly rejected): ${desc}"
+          }
+
+          # A policy that accepts a signature from another repo's workflow is
+          # not a policy. These are the assertions that give the positive test
+          # its meaning.
+          must_fail "identity from a different repo" \
+            cosign verify --certificate-oidc-issuer "$ISSUER" \
+              --certificate-identity-regexp '^https://github\.com/odigos-io/some-other-repo/.*$' \
+              "${TEST_IMAGE}@${DIGEST}"
+
+          must_fail "identity from a different workflow in this repo" \
+            cosign verify --certificate-oidc-issuer "$ISSUER" \
+              --certificate-identity-regexp '^https://github\.com/odigos-io/ci-core/\.github/workflows/publish\.yml@.*$' \
+              "${TEST_IMAGE}@${DIGEST}"
+
+          must_fail "wrong OIDC issuer" \
+            cosign verify --certificate-oidc-issuer https://accounts.google.com \
+              --certificate-identity-regexp "$GOOD" \
+              "${TEST_IMAGE}@${DIGEST}"
+
+          must_fail "attestation type that was never attested" \
+            cosign verify-attestation --type slsaprovenance \
+              --certificate-oidc-issuer "$ISSUER" --certificate-identity-regexp "$GOOD" \
+              "${TEST_IMAGE}@${DIGEST}"
+
+      # Old untagged versions of ci-core-signing-test accumulate in GHCR. Prune
+      # the package periodically; automating it here would mean granting this
+      # workflow packages: delete, which is not worth it for a test image.
+      - name: Summary
+        if: always()
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### sign-oci test"
+            echo
+            echo "- image: \`${TEST_IMAGE}@${DIGEST}\`"
+            echo "- tag:   \`run-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
