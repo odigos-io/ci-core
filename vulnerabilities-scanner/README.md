@@ -27,7 +27,15 @@ A GitHub Actions composite action that scans container images or filesystem path
 
 | Output | Description |
 |--------|-------------|
-| `results-json` | The raw Grype scan results in JSON format |
+| `results-file` | Path to the raw Grype JSON results file. Always written, at any size. |
+| `total-count` | Total number of matches found |
+| `critical-count` | Number of CRITICAL severity matches |
+| `high-count` | Number of HIGH severity matches |
+| `cutoff-exceeded` | `'true'` when findings at or above `severity-cutoff` were present. Set even when the step is wrapped in `continue-on-error`. |
+
+Results are returned as a file rather than an inline string: a large report cannot be
+expanded through a GitHub Actions expression, which previously truncated big scans to
+an empty value without failing.
 
 ### Scan a container image
 ```yaml
@@ -82,7 +90,7 @@ steps:
 
   - name: Process scan results
     run: |
-      echo '${{ steps.scan.outputs.results-json }}' | jq '.matches | length'
+      jq '.matches | length' "${{ steps.scan.outputs.results-file }}"
 ```
 
 ## Behavior
