@@ -1,0 +1,129 @@
+name: Semver Info
+description: |
+  Reads git tags and origin release branches and outputs Odigos semantic
+  version fields. Repo must already be checked out with fetch-depth: 0.
+  Optional input directory is the git working tree (default: workspace root);
+  set it when checkout used path:.
+
+  latest_stable is the highest published vX.Y.Z tag (may be a patch).
+  last_release_line is the highest started vX.Y.0 line (from that tag's series
+  or a newer unpublished releases/vX.Y.0 branch). next_release is always
+  one minor after last_release_line. next_pre / next_rc are for next_release,
+  not last_release_line.
+
+  Example A — published v1.21.4, no 1.22 branch, no pres:
+    latest_stable=v1.21.4  last_release_line=v1.21.0  last_release_branch=
+    next_release=v1.22.0   latest_pre=  next_pre=v1.22.0-pre0  has_pre=false
+
+  Example B — same, but v1.22.0-pre2 already exists:
+    last_release_line=v1.21.0   next_release=v1.22.0
+    latest_pre=v1.22.0-pre2  next_pre=v1.22.0-pre3  has_pre=true
+
+  Example C — RC started: releases/v1.22.0 exists, stable still v1.21.4:
+    latest_stable=v1.21.4  last_release_line=v1.22.0
+    last_release_branch=releases/v1.22.0  next_release=v1.23.0
+    next_pre=v1.23.0-pre0  (1.22 is no longer the pre target)
+
+inputs:
+  directory:
+    description: |
+      Git working tree to inspect (relative to GITHUB_WORKSPACE, or absolute).
+      Required when actions/checkout used path: so the repo is not at the
+      workspace root. Defaults to the workspace root.
+    required: false
+    default: "."
+
+outputs:
+  latest_stable:
+    description: |
+      Highest published stable tag (vX.Y.Z). Empty if none exist.
+      Unlike last_release_line this keeps the patch (v1.21.4 not v1.21.0)
+      and ignores unpublished release branches.
+    value: ${{ steps.calc.outputs.latest_stable }}
+  last_release_line:
+    description: |
+      Highest started release line as vX.Y.0. Max of (1) latest_stable's
+      series and (2) the highest origin releases/vX.Y.0 branch, so an
+      unpublished line with a branch still wins. Not a git ref — see
+      last_release_branch for the branch name.
+    value: ${{ steps.calc.outputs.last_release_line }}
+  last_release_branch:
+    description: |
+      Git ref of the highest origin release branch (releases/vX.Y.0).
+      Empty when last_release_line is inferred only from a stable tag
+      (no releases/* branch on origin yet).
+    value: ${{ steps.calc.outputs.last_release_branch }}
+  next_release:
+    description: |
+      The line after last_release_line: vX.(Y+1).0. This is the series
+      next_pre and next_rc apply to, even if last_release_line is unpublished.
+    value: ${{ steps.calc.outputs.next_release }}
+  latest_pre:
+    description: |
+      Highest existing vX.Y.0-preN tag on next_release. Empty if none
+      (has_pre=false). What already exists — not what to create next
+      (that is next_pre).
+    value: ${{ steps.calc.outputs.latest_pre }}
+  next_pre:
+    description: |
+      Tag to create for the next pre of next_release: pre0 if latest_pre
+      is empty, otherwise pre(N+1). Always set; scoped to next_release,
+      never last_release_line.
+    value: ${{ steps.calc.outputs.next_pre }}
+  has_pre:
+    description: |
+      true if latest_pre is non-empty, else false. Convenience flag;
+      equivalent to testing whether latest_pre != ''.
+    value: ${{ steps.calc.outputs.has_pre }}
+  latest_rc:
+    description: |
+      Highest existing vX.Y.0-rcN tag on next_release. Empty if none
+      (has_rc=false). Counterpart of latest_pre for release candidates.
+    value: ${{ steps.calc.outputs.latest_rc }}
+  next_rc:
+    description: |
+      Tag to create for the next rc of next_release: rc0 if latest_rc
+      is empty, otherwise rc(N+1). Counterpart of next_pre.
+    value: ${{ steps.calc.outputs.next_rc }}
+  has_rc:
+    description: |
+      true if latest_rc is non-empty, else false. Counterpart of has_pre.
+    value: ${{ steps.calc.outputs.has_rc }}
+
+runs:
+  using: composite
+  steps:
+    - name: Calculate semver info
+      id: calc
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      env:
+        DIRECTORY: ${{ inputs.directory }}
+      run: node "${{ github.action_path }}/calculate.js"
+
+    - name: Write semver summary
+      shell: bash
+      env:
+        LATEST_STABLE: ${{ steps.calc.outputs.latest_stable }}
+        LAST_RELEASE_LINE: ${{ steps.calc.outputs.last_release_line }}
+        LAST_RELEASE_BRANCH: ${{ steps.calc.outputs.last_release_branch }}
+        NEXT_RELEASE: ${{ steps.calc.outputs.next_release }}
+        LATEST_PRE: ${{ steps.calc.outputs.latest_pre }}
+        NEXT_PRE: ${{ steps.calc.outputs.next_pre }}
+        LATEST_RC: ${{ steps.calc.outputs.latest_rc }}
+        NEXT_RC: ${{ steps.calc.outputs.next_rc }}
+      run: |
+        {
+          echo "## Semver info"
+          echo ""
+          echo "| Field | Value |"
+          echo "|-------|-------|"
+          echo "| Latest stable | \`${LATEST_STABLE:-'(none)'}\` |"
+          echo "| Last release line | \`${LAST_RELEASE_LINE}\` |"
+          echo "| Last release branch | \`${LAST_RELEASE_BRANCH:-'(none)'}\` |"
+          echo "| Next release | \`${NEXT_RELEASE}\` |"
+          echo "| Next pre | \`${NEXT_PRE}\` |"
+          echo "| Latest pre | \`${LATEST_PRE:-'(none)'}\` |"
+          echo "| Next rc | \`${NEXT_RC}\` |"
+          echo "| Latest rc | \`${LATEST_RC:-'(none)'}\` |"
+        } >> "$GITHUB_STEP_SUMMARY"
