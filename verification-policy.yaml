@@ -45,7 +45,7 @@ artifacts:
     identity: '^https://github\.com/odigos-io/enterprise-go-instrumentation/\.github/workflows/offsets-push\.yml@refs/heads/.*$'
     refs:
       - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-cli-offsets
-    floor:  # first signed release, 2026-08-14, verified externally
+    floor: v1.34.3-f181968 # first signed release (2026-08-13); latest (v1.34.3-16e3399) verified externally incl. SBOM
     note: only :latest and :<cli-version>-<sha> tags are published, by design
 
   - name: odigos-vmagent-instrumentations
