@@ -23,8 +23,7 @@ identity unnoticed.
 
 The signature and a CycloneDX SBOM are uploaded **to the same registry as the image**,
 linked to its digest (via the OCI referrers API, or a `sha256-<digest>` tag on
-registries without it). They do **not** travel with `crane copy` — mirrors use
-`oras copy -r`. Retags are free: everything hangs off the digest.
+registries without it).
 
 ## How to verify
 
