@@ -45,4 +45,14 @@ minted by any workflow in the org, including PR CI.
   alerts on Slack if any recent tag above its signing floor lacks a signature
 - [backfill-sign](./.github/workflows/backfill-sign.yml) — signing is fail-closed, so a
   Sigstore outage means shipping unsigned on purpose; this signs the already-published
-  digest after the fact (digests don't change, so the result is identical)
+  digest after the fact
+
+### Retroactive signing
+
+Signing an old image is the same operation as signing a new one: a signature is a
+separate small artifact whose subject is the **digest**, uploaded next to the image —
+the image itself is never touched, and a referrer can be attached to an existing
+manifest at any time. The only difference is the certificate identity, which truthfully
+records `backfill-sign.yml` and *today's* Rekor timestamp — so a backfill always
+verifies, but audit can always tell it apart from a release-time signature. No
+backdating is possible.
