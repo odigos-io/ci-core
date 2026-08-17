@@ -76,12 +76,18 @@ jobs:
               *components-private*) SKIPPED="${SKIPPED}${ref} (private)\n"; continue ;;
             esac
 
-            # Newest N version tags at or above the floor. sort -V puts the
-            # floor in order with the tags; everything after it qualifies.
+            # Newest N tags whose VERSION PREFIX is at or above the floor.
+            # Floors are bare versions (vX.Y.Z); tags may carry a -<sha> suffix,
+            # and git shas do not sort chronologically — anchoring on the full
+            # tag string would silently skip tags whose suffix sorts below the
+            # floor's, leaving unchecked blind spots.
             tags=$(crane ls "$ref" 2>/dev/null \
               | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' \
               | sort -V \
-              | awk -v fl="$floor" '$0==fl{f=1} f{print}' \
+              | while IFS= read -r t; do \
+                  v=${t%%-*}; \
+                  [ "$(printf '%s\n%s\n' "$floor" "$v" | sort -V | head -1)" = "$floor" ] && echo "$t"; \
+                done \
               | tail -n "$TAGS_TO_CHECK")
             if [ -z "$tags" ]; then
               SKIPPED="${SKIPPED}${ref} (no tags above floor ${floor})\n"
