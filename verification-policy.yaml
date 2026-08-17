@@ -40,7 +40,7 @@ artifacts:
     identity: '^https://github\.com/odigos-io/ebpf-core/\.github/workflows/build-sender\.yml@refs/(heads/main|heads/releases/.*|tags/.*)$'
     refs:
       - us-central1-docker.pkg.dev/odigos-cloud/components/wasp-init
-    floor: null # set when the signing PR merges and the first signed tag ships
+    floor: v0.0.6 # backfill-signed (RUN-1078); releases from v0.0.7 sign at build via build-sender.yml
 
   - name: odigos-cli-offsets
     repo: odigos-io/enterprise-go-instrumentation
