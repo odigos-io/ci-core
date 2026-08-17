@@ -18,9 +18,11 @@
 #   ones under refs/tags/<tag>. Some artifacts legitimately have both.
 # - Stable x.y.0 component images are same-repo retags of the RC digest, so
 #   they verify against the RC-tagged identity. That is correct, not a bug.
-# - `floor` is the first version from which signatures exist. Tags older than
-#   the floor are unsigned history. `floor: null` means signing has not
-#   shipped for this artifact yet — the drift check skips it.
+# - `floor` is the first version from which signatures exist, as a BARE
+#   version (vX.Y.Z, no suffix). Tags compare by their version prefix, so
+#   sha-suffixed builds of the floor version are all covered. Tags below the
+#   floor are unsigned history. `floor: null` means signing has not shipped
+#   for this artifact yet — the drift check skips it.
 
 issuer: https://token.actions.githubusercontent.com
 sbom_type: cyclonedx
@@ -45,7 +47,7 @@ artifacts:
     identity: '^https://github\.com/odigos-io/enterprise-go-instrumentation/\.github/workflows/offsets-push\.yml@refs/heads/.*$'
     refs:
       - us-central1-docker.pkg.dev/odigos-cloud/components/odigos-cli-offsets
-    floor: v1.34.3-f181968 # first signed release (2026-08-13); latest (v1.34.3-16e3399) verified externally incl. SBOM
+    floor: v1.34.3 # first signed releases 2026-08-13/14 (both v1.34.3-* builds), verified externally incl. SBOM
     note: only :latest and :<cli-version>-<sha> tags are published, by design
 
   - name: odigos-vmagent-instrumentations
