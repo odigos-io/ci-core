@@ -1,4 +1,7 @@
 name: Backfill Sign
+# The run list must say what each dispatch signed — a batch of backfills is
+# unreadable as "Manually run by <user>" xN.
+run-name: "Backfill Sign · ${{ inputs.refs }} @ ${{ inputs.digest }}"
 
 # Break-glass companion. Signing is fail-closed in every publish job; when
 # Sigstore or a registry is down mid-release, the documented escape is to ship
