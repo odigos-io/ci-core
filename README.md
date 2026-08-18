@@ -19,9 +19,7 @@
 ### Security and Supply Chain
 1. [vulnerabilities-scanner](./vulnerabilities-scanner/README.md)
 2. [sign-oci](./sign-oci/README.md) — keyless cosign signing and SBOM attestation for published images
-3. [verification-policy.yaml](./verification-policy.yaml) — per-artifact OIDC identities, signature locations, and signing floors
-4. [backfill-sign](./.github/workflows/backfill-sign.yml) — break-glass: sign an already-published digest after an outage forced an unsigned release
-5. [signature-drift-check](./.github/workflows/signature-drift-check.yml) — daily assertion that recent tags carry signatures
+3. [backfill-sign](./.github/workflows/backfill-sign.yml) — break-glass: sign an already-published digest after an outage forced an unsigned release
 
 ### Supply-chain signing
 See [SIGNING.md](./SIGNING.md) — how signatures are made (keyless/Fulcio), where they live, and how to verify.
