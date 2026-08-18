@@ -27,22 +27,47 @@ registries without it).
 
 ## How to verify
 
-Use the identity for the artifact from [verification-policy.yaml](./verification-policy.yaml):
-
 ```bash
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '<identity from verification-policy.yaml>' \
+  --certificate-identity-regexp '<identity from the table below>' \
   <registry>/<image>@<digest>
 ```
 
 Never verify with a broad pattern like `.*odigos-io.*` — that would accept a signature
 minted by any workflow in the org, including PR CI.
 
+| Artifact | Signing identity (regexp) | Signed since |
+|---|---|---|
+| odigos components (`odigos-{autoscaler,scheduler,instrumentor,collector,odiglet,ui,operator,agents}`) | `^https://github\.com/odigos-io/odigos/\.github/workflows/publish-modules\.yml@refs/tags/v.*$` | v1.30.0 |
+| `odigos-cli` (image) | `^https://github\.com/odigos-io/odigos/\.github/workflows/release\.yml@refs/heads/main$` | v1.30.0 |
+| `odigos-victoria-metrics` (re-hosted upstream) | `^https://github\.com/odigos-io/odigos/\.github/workflows/release\.yml@refs/heads/main$` | v1.30.0 |
+| enterprise components (`odigos-enterprise-*`) | `^https://github\.com/odigos-io/odigos-enterprise/\.github/workflows/release-images\.yml@refs/(tags/.*\|heads/.*)$` | releases after 2026-08-17 |
+| `wasp-init` | `^https://github\.com/odigos-io/ebpf-core/\.github/workflows/build-sender\.yml@refs/(heads/main\|heads/releases/.*\|tags/.*)$` | v0.0.6 |
+| `odigos-cli-offsets` | `^https://github\.com/odigos-io/enterprise-go-instrumentation/\.github/workflows/offsets-push\.yml@refs/heads/.*$` | v1.34.3 (only `:latest` and `:<version>-<sha>` tags exist, by design) |
+| `odigos-vmagent-instrumentations` | `^https://github\.com/odigos-io/vm-agent/\.github/workflows/publish-agents\.yml@refs/(heads/.*\|tags/agents/.*)$` | publishes after 2026-08-12 |
+
+Reading the table:
+
+- **"Signed since" applies to the canonical registry** —
+  `us-central1-docker.pkg.dev/odigos-cloud/components` — where history was
+  retroactively backfilled. Mirrors (`docker.io/keyval`, `ghcr.io/odigos-io`)
+  only carry signatures from when release-time signing went live
+  (2026-08-17, the v1.36.0-pre trains); verify older versions against GAR.
+- **Backfilled history verifies under a different identity**: swap the regexp for
+  `^https://github\.com/odigos-io/ci-core/\.github/workflows/backfill-sign\.yml@refs/heads/main$`.
+  The distinct identity is deliberate — audit can always tell a backfill from a
+  release-time signature.
+- **Stable `x.y.0` component tags are retags of the RC digest** and verify against
+  the RC's tag identity. `odigos-victoria-metrics` is a re-hosted upstream image:
+  the signature attests that odigos published that exact digest, not that odigos
+  built it.
+- Identities are per repo AND per workflow. Dispatch-triggered workflows sign under
+  `refs/heads/<branch>` (the CLI's `release.yml` signs as `refs/heads/main`, never a
+  tag); tag-triggered ones under `refs/tags/<tag>`.
+
 ## Operations
 
-- [signature-drift-check](./.github/workflows/signature-drift-check.yml) — daily cron;
-  alerts on Slack if any recent tag above its signing floor lacks a signature
 - [backfill-sign](./.github/workflows/backfill-sign.yml) — signing is fail-closed, so a
   Sigstore outage means shipping unsigned on purpose; this signs the already-published
   digest after the fact
