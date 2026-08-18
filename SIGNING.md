@@ -66,6 +66,28 @@ Reading the table:
   `refs/heads/<branch>` (the CLI's `release.yml` signs as `refs/heads/main`, never a
   tag); tag-triggered ones under `refs/tags/<tag>`.
 
+## Verifying the SBOM attestation
+
+Every signed image also carries a CycloneDX SBOM as an in-toto attestation
+(backfills included — sign-oci attaches one by default). Same identity rules as
+signatures:
+
+```bash
+cosign verify-attestation \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '<identity from the table above>' \
+  --type cyclonedx \
+  <registry>/<image>@<digest> \
+  | jq -r '.payload' | base64 -d | jq '.predicate'
+```
+
+This proves the same chain as `cosign verify` (Fulcio identity + Rekor inclusion)
+plus that the SBOM's in-toto subject is exactly this digest; `.predicate` is the
+SBOM. Two caveats: attestations attach to the **index digest** only — per-arch
+child digests carry signatures but no attestation (`cosign attest` has no
+`--recursive`) — and the SBOM describes a single platform, since syft resolves
+one child of a multi-arch index.
+
 ## Operations
 
 - [backfill-sign](./.github/workflows/backfill-sign.yml) — signing is fail-closed, so a
