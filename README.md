@@ -30,6 +30,7 @@ See [SIGNING.md](./SIGNING.md) — how signatures are made (keyless/Fulcio), whe
 3. [cherry-pick](./cherry-pick/README.md)
 4. [dispatch-agent-version-update](./dispatch-agent-version-update/README.md)
 5. [apply-agent-version-update](./apply-agent-version-update/README.md)
+6. [linear-release](./linear-release/README.md) — record a published release and the issues it shipped in Linear
 
 ### Release and Deployment Notifications
 1. [slack-release-notification](./.github/actions/slack-release-notification/README.md)
