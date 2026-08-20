@@ -103,3 +103,11 @@ manifest at any time. The only difference is the certificate identity, which tru
 records `backfill-sign.yml` and *today's* Rekor timestamp — so a backfill always
 verifies, but audit can always tell it apart from a release-time signature. No
 backdating is possible.
+
+## Linux package signing (GPG)
+
+Odigos `.deb` and `.rpm` packages are signed with a dedicated GPG key, not cosign.
+Two keys are in play: Google's Artifact Registry key signs the **repo metadata**
+(that's what `apt.odigos.io/doc/repo-signing-key.gpg` serves), while the Odigos key
+signs the **packages themselves**. Key ceremony, storage, rotation, and compromise
+response live in the [GPG custody runbook](./docs/gpg-custody.md).
