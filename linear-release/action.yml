@@ -2,10 +2,13 @@ name: "Linear Release"
 description: "Sync a released tag into a Linear release pipeline, attaching the issues that shipped in it."
 
 # Runs AFTER the tag and the GitHub release exist. The sync walks the commits in
-# `<base-ref>..HEAD` and finds Linear issues through branch names, magic words,
-# issue keys in the subject, and the pull request a commit came from — so the
-# calling job must be sitting on the released commit with history
-# (`fetch-depth: 0`).
+# `<base-ref>..HEAD`, so the calling job must be sitting on the released commit
+# with history (`fetch-depth: 0`).
+#
+# Out of the box the CLI only recognises an issue key preceded by a magic word
+# ("fixes RUN-1", "part of RUN-1") or a `(#123)` pull request reference. A key
+# sitting on its own in the subject is NOT detected — hence the `issue-pattern`
+# default below, which is what makes our usual `feat(x): thing (RUN-1)` link.
 #
 # Which Linear pipeline a release lands in is decided by the access key, not by
 # anything here — a pipeline access key belongs to exactly one pipeline.
@@ -48,6 +51,23 @@ inputs:
     description: "Comma-separated globs restricting which commits count, e.g. `frontend/**,common/**`. For monorepos."
     required: false
     default: ""
+  issue-pattern:
+    description: >
+      Regex whose FIRST capture group is a Linear issue key, matched against
+      commit subjects. Without this the CLI only detects keys preceded by a
+      magic word ("fixes RUN-1", "part of RUN-1"), so a bare or parenthesised
+      key is invisible — which is how most of our commits are written. The
+      default covers the odigos team keys.
+    required: false
+    default: '((?:CORE|PLAT|PRD|RUN|GEN|DEVOPS|SEC)-[0-9]+)'
+  release-notes:
+    description: >
+      Path to a markdown file whose contents become the release notes in
+      Linear. Linear only auto-generates notes from attached issues, so a
+      release that matched none has nothing to show without this. A missing
+      file is a warning, not an error.
+    required: false
+    default: ""
   dry-run:
     description: "Scan commits and read from Linear, but skip the create/update mutations."
     required: false
@@ -85,6 +105,7 @@ runs:
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         VERSION: ${{ inputs.version }}
         BASE_REF: ${{ inputs.base-ref }}
+        RELEASE_NOTES: ${{ inputs.release-notes }}
       run: |
         set -euo pipefail
 
@@ -98,6 +119,13 @@ runs:
           BASE_REF=""
         fi
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+
+        # Losing the notes is not worth losing the sync over.
+        if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
+          echo "::warning::linear-release: release-notes file ${RELEASE_NOTES} does not exist; syncing without notes."
+          RELEASE_NOTES=""
+        fi
+        echo "release-notes=${RELEASE_NOTES}" >> "$GITHUB_OUTPUT"
 
         if [[ -n "${ACCESS_KEY}" ]]; then
           exit 0
@@ -128,6 +156,8 @@ runs:
         version: ${{ inputs.version }}
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
+        issue_pattern: ${{ inputs.issue-pattern }}
+        release_notes: ${{ steps.guard.outputs.release-notes }}
         dry_run: ${{ inputs.dry-run }}
         # Pinned here rather than inherited: upstream's own cli_version default
         # moves with the action version, and owning that pin in one place is the
