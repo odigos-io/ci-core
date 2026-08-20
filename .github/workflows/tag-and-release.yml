@@ -37,6 +37,7 @@ jobs:
       contents: read
     outputs:
       new_version: ${{ steps.calc.outputs.new_version }}
+      current_version: ${{ steps.calc.outputs.current_version }}
       create_branch: ${{ steps.calc.outputs.create_branch }}
       release_branch: ${{ steps.calc.outputs.release_branch }}
       base_branch: ${{ steps.normalize.outputs.base_branch }}
