@@ -40,6 +40,8 @@ jobs:
 | `version` | yes | | Version the Linear release is named after, e.g. `v1.4.2` |
 | `base-ref` | no | | Start of the commit scan, **exclusive** — the previous release tag, if it exists |
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
+| `issue-pattern` | no | odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
+| `release-notes` | no | | Path to a markdown file to use as the release notes |
 | `dry-run` | no | `false` | Scan and read, but make no changes in Linear |
 | `fail-on-error` | no | `false` | Fail the step instead of warning when the sync cannot run |
 
@@ -57,7 +59,9 @@ jobs:
 
 **Failures are otherwise swallowed.** This runs after the release is published, so a Linear problem warns rather than turning the job red. Look for the warning annotation. `fail-on-error: "true"` opts out; an unset secret is a warning either way.
 
-**Issue detection is broader than commit subjects.** Upstream matches branch names, magic words, `TEAM-123` keys, and the pull request a commit came from, so a squash-merge whose only link is `(#2173)` still resolves. No commit-convention change is needed.
+**A bare issue key in a commit subject is NOT detected by default.** Upstream only matches a key preceded by a magic word (`fixes RUN-1`, `part of RUN-1`) or a `(#123)` pull request reference. `feat(x): thing (RUN-1)` matches nothing on its own — which is why `issue-pattern` defaults to the odigos team keys here. If you override it, keep the key in **capture group 1**; the pattern is applied to the subject only, never the body.
+
+**Zero issues means zero auto-generated notes.** Linear generates notes from the issues attached to a release, so a release that matched none shows nothing. Pass `release-notes` with a file — e.g. the body GitHub already generated for the tag — to have something either way.
 
 **The CLI is not pinned by digest.** The action is pinned to a commit SHA, but that commit downloads the `linear-release` binary from a mutable release tag with no checksum.
 
