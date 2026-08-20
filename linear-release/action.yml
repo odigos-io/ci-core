@@ -39,9 +39,9 @@ inputs:
   base-ref:
     description: >
       Start of the commit scan, exclusive — `<base-ref>..HEAD`. Pass the
-      PREVIOUS release tag, and only if it exists: a ref that cannot be resolved
-      fails the scan. Left empty, Linear picks the base from its own record of
-      the last release.
+      PREVIOUS release tag; it is dropped with a warning if it is unresolvable
+      or not an ancestor of HEAD, so it is safe to pass unconditionally. Left
+      empty, Linear picks the base from its own record of the last release.
     required: false
     default: ""
   include-paths:
@@ -77,15 +77,27 @@ runs:
   using: composite
   steps:
 
-    - name: Check for an access key
+    - name: Validate inputs
       id: guard
       shell: bash
       env:
         ACCESS_KEY: ${{ inputs.access-key }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         VERSION: ${{ inputs.version }}
+        BASE_REF: ${{ inputs.base-ref }}
       run: |
         set -euo pipefail
+
+        # A base-ref that is not on this branch's history makes the scan fail
+        # outright. That is the normal case, not an edge one: the highest tag by
+        # semver usually lives on a release branch, so a minor cut from the
+        # default branch gets handed a ref it cannot reach. Drop it and let
+        # Linear choose its own baseline rather than losing the whole sync.
+        if [[ -n "${BASE_REF}" ]] && ! git merge-base --is-ancestor "${BASE_REF}" HEAD 2>/dev/null; then
+          echo "::warning::linear-release: base-ref ${BASE_REF} is unresolvable or not an ancestor of HEAD; letting Linear choose the scan baseline."
+          BASE_REF=""
+        fi
+        echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
         if [[ -n "${ACCESS_KEY}" ]]; then
           exit 0
@@ -114,7 +126,7 @@ runs:
         access_key: ${{ inputs.access-key }}
         command: sync
         version: ${{ inputs.version }}
-        base_ref: ${{ inputs.base-ref }}
+        base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
         dry_run: ${{ inputs.dry-run }}
         # Pinned here rather than inherited: upstream's own cli_version default

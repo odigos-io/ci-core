@@ -30,7 +30,7 @@ jobs:
           base-ref: ${{ needs.calculate.outputs.current_version }}
 ```
 
-`base-ref` is optional but worth passing — it pins the commit range to exactly the previous release. Only pass a tag that exists; `tag-and-release` reports `v0.0.0` for a repo with no tags, so filter that out with `!= 'v0.0.0' && ... || ''`.
+`base-ref` is optional but worth passing — it pins the commit range to exactly the previous release. Pass it unconditionally: it is dropped with a warning if it is unresolvable or not on this branch's history, which covers both `tag-and-release`'s `v0.0.0` placeholder and the common case below.
 
 ## Inputs
 
@@ -52,6 +52,8 @@ jobs:
 **The access key picks the pipeline, nothing here does.** A key belongs to exactly one pipeline, so a repo given the wrong key files its releases in someone else's. An org-wide `LINEAR_ACCESS_KEY` therefore sends every repo to the same pipeline; repos that need their own want a repo-level secret.
 
 **Give it its own job.** Two reasons: the third-party CLI it downloads should not run beside a release job's credentials, and the runner resolves remote actions during job *setup*, before `continue-on-error` can catch anything — in the tagging job that would fail the release outright.
+
+**`base-ref` is often not on your branch.** `tag-and-release` reports the highest tag by semver, which usually lives on a release branch — so a minor cut from the default branch gets a ref it cannot reach, and an unguarded scan fails outright. The action drops such a ref with a warning and lets Linear pick the baseline. It also needs `fetch-depth: 0` to resolve one at all.
 
 **Failures are otherwise swallowed.** This runs after the release is published, so a Linear problem warns rather than turning the job red. Look for the warning annotation. `fail-on-error: "true"` opts out; an unset secret is a warning either way.
 
