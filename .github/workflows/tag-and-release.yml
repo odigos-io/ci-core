@@ -130,6 +130,6 @@ jobs:
         with:
           access-key: ${{ secrets.LINEAR_ACCESS_KEY }}
           version: ${{ needs.calculate.outputs.new_version }}
-          # calculate.js reports v0.0.0 when the repo has no tags yet; that ref
-          # does not exist, so let Linear pick the scan base instead.
-          base-ref: ${{ needs.calculate.outputs.current_version != 'v0.0.0' && needs.calculate.outputs.current_version || '' }}
+          # The action drops this when it is not an ancestor of HEAD, which is
+          # what happens whenever the highest tag lives on a release branch.
+          base-ref: ${{ needs.calculate.outputs.current_version }}
