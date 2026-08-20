@@ -1,0 +1,160 @@
+name: "Linear Release"
+description: "Sync a released tag into a Linear release pipeline, attaching the issues that shipped in it."
+
+# Runs AFTER the tag and the GitHub release exist. The sync walks the commits in
+# `<base-ref>..HEAD` and finds Linear issues through branch names, magic words,
+# issue keys in the subject, and the pull request a commit came from — so the
+# calling job must be sitting on the released commit with history
+# (`fetch-depth: 0`).
+#
+# Which Linear pipeline a release lands in is decided by the access key, not by
+# anything here — a pipeline access key belongs to exactly one pipeline.
+#
+# Fail-soft by design: by the time this runs the release is already published,
+# so a Linear outage — or a repo whose LINEAR_ACCESS_KEY is not provisioned yet
+# — warns and moves on instead of turning a shipped release red. Set
+# `fail-on-error: "true"` to opt out of that.
+#
+#   - uses: odigos-io/ci-core/linear-release@main
+#     with:
+#       access-key: ${{ secrets.LINEAR_ACCESS_KEY }}
+#       version: ${{ needs.calculate.outputs.new_version }}
+#       base-ref: ${{ needs.calculate.outputs.current_version }}
+
+inputs:
+  access-key:
+    description: >
+      Linear pipeline access key, normally `secrets.LINEAR_ACCESS_KEY`. An unset
+      secret interpolates to an empty string rather than erroring, so an empty
+      value skips the sync — the usage snippet can be adopted in a repo before
+      anyone has provisioned the secret.
+    required: false
+    default: ""
+  version:
+    description: >
+      Version the Linear release is named after, e.g. `v1.4.2`. Pass it
+      explicitly — left empty, Linear names the release after the short commit
+      SHA instead, which is almost never what a tagged release wants.
+    required: true
+  base-ref:
+    description: >
+      Start of the commit scan, exclusive — `<base-ref>..HEAD`. Pass the
+      PREVIOUS release tag, and only if it exists: a ref that cannot be resolved
+      fails the scan. Left empty, Linear picks the base from its own record of
+      the last release.
+    required: false
+    default: ""
+  include-paths:
+    description: "Comma-separated globs restricting which commits count, e.g. `frontend/**,common/**`. For monorepos."
+    required: false
+    default: ""
+  dry-run:
+    description: "Scan commits and read from Linear, but skip the create/update mutations."
+    required: false
+    default: "false"
+  fail-on-error:
+    description: >
+      Fail the step when the sync cannot start or Linear rejects it. Default
+      false — see the fail-soft note above.
+    required: false
+    default: "false"
+
+outputs:
+  release-id:
+    description: "Linear release ID. Empty when nothing was created or updated."
+    value: ${{ steps.sync.outputs.release-id }}
+  release-name:
+    description: "Linear release name. Empty when nothing was created or updated."
+    value: ${{ steps.sync.outputs.release-name }}
+  release-version:
+    description: "Linear release version. Empty when nothing was created or updated."
+    value: ${{ steps.sync.outputs.release-version }}
+  release-url:
+    description: "URL of the Linear release. Empty when nothing was created or updated."
+    value: ${{ steps.sync.outputs.release-url }}
+
+runs:
+  using: composite
+  steps:
+
+    - name: Check for an access key
+      id: guard
+      shell: bash
+      env:
+        ACCESS_KEY: ${{ inputs.access-key }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [[ -n "${ACCESS_KEY}" ]]; then
+          exit 0
+        fi
+
+        MSG="linear-release: no access key, so ${VERSION:-this release} was not synced to Linear. Add the LINEAR_ACCESS_KEY secret and pass it as access-key."
+        if [[ "${FAIL_ON_ERROR}" == "true" ]]; then
+          echo "::error::${MSG}"
+          exit 1
+        fi
+
+        echo "::warning::${MSG}"
+        echo "skip=true" >> "$GITHUB_OUTPUT"
+
+    - name: Sync release to Linear
+      id: sync
+      if: steps.guard.outputs.skip != 'true'
+      # A literal `true`, deliberately, and not `${{ inputs.fail-on-error != 'true' }}`:
+      # the runner evaluates this key only after the wrapped action has run, by
+      # which point it has swapped the `inputs` context for the WRAPPED action's
+      # inputs — so any expression reading ours silently evaluates to null and the
+      # flag would be a no-op. Whether a failure is fatal is decided one step down.
+      continue-on-error: true
+      uses: linear/linear-release-action@17b8c24f8ceb2b98cabaf1965ff83c55dd596fac # v0.15.1
+      with:
+        access_key: ${{ inputs.access-key }}
+        command: sync
+        version: ${{ inputs.version }}
+        base_ref: ${{ inputs.base-ref }}
+        include_paths: ${{ inputs.include-paths }}
+        dry_run: ${{ inputs.dry-run }}
+        # Pinned here rather than inherited: upstream's own cli_version default
+        # moves with the action version, and owning that pin in one place is the
+        # reason this wrapper exists.
+        cli_version: v0.15.0
+        log_level: ${{ runner.debug == '1' && 'verbose' || '' }}
+
+    - name: Report the outcome
+      # Skipped whenever the sync was — the guard has already had its say.
+      if: always() && steps.sync.outcome != 'skipped'
+      shell: bash
+      env:
+        OUTCOME: ${{ steps.sync.outcome }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        RELEASE_NAME: ${{ steps.sync.outputs.release-name }}
+        RELEASE_URL: ${{ steps.sync.outputs.release-url }}
+      run: |
+        set -euo pipefail
+
+        # `continue-on-error` above hides the red X, so this is where a failure
+        # becomes visible — and, if the caller asked for it, fatal.
+        if [[ "${OUTCOME}" != "success" ]]; then
+          MSG="linear-release: the Linear sync failed. The tag and the GitHub release are unaffected; re-run this job or add the release in Linear by hand."
+          if [[ "${FAIL_ON_ERROR}" == "true" ]]; then
+            echo "::error::${MSG}"
+            exit 1
+          fi
+          echo "::warning::${MSG}"
+          exit 0
+        fi
+
+        # dry-run, and a sync that matched no issues, both return without a URL.
+        if [[ -z "${RELEASE_URL}" ]]; then
+          echo "linear-release: no release was created or updated."
+          exit 0
+        fi
+
+        {
+          echo "### Linear release"
+          echo
+          echo "- [${RELEASE_NAME}](${RELEASE_URL})"
+        } >> "$GITHUB_STEP_SUMMARY"

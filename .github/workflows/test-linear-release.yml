@@ -1,0 +1,98 @@
+name: linear-release Test
+
+# Exercises the fail-soft contract, which is the whole reason this wrapper
+# exists. None of these cases need a real LINEAR_ACCESS_KEY.
+#
+# The bogus-key case is the one that matters: it lets the upstream action run
+# for real and fail against Linear, proving that `continue-on-error` on a
+# composite action's own step is honoured. If GitHub ever stops honouring it,
+# every caller silently starts failing its release job — this catches that.
+
+on:
+  pull_request:
+    paths:
+      - 'linear-release/**'
+      - '.github/workflows/test-linear-release.yml'
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  fail-soft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No access key is a skip, not a failure
+        id: no-key
+        uses: ./linear-release
+        with:
+          access-key: ""
+          version: v0.0.0-test
+
+      - name: No access key with fail-on-error is a failure
+        id: no-key-strict
+        continue-on-error: true
+        uses: ./linear-release
+        with:
+          access-key: ""
+          version: v0.0.0-test
+          fail-on-error: "true"
+
+      # A syntactically plausible key that Linear will reject. The upstream
+      # action downloads its CLI and really calls Linear here.
+      - name: A rejected key is swallowed
+        id: bad-key
+        uses: ./linear-release
+        with:
+          access-key: lin_pipeline_0000000000000000000000000000000000000000
+          version: v0.0.0-test
+
+      - name: A rejected key with fail-on-error surfaces
+        id: bad-key-strict
+        continue-on-error: true
+        uses: ./linear-release
+        with:
+          access-key: lin_pipeline_0000000000000000000000000000000000000000
+          version: v0.0.0-test
+          fail-on-error: "true"
+
+      - name: Assert each case behaved as documented
+        env:
+          NO_KEY: ${{ steps.no-key.outcome }}
+          NO_KEY_STRICT: ${{ steps.no-key-strict.outcome }}
+          BAD_KEY: ${{ steps.bad-key.outcome }}
+          BAD_KEY_STRICT: ${{ steps.bad-key-strict.outcome }}
+          NO_KEY_URL: ${{ steps.no-key.outputs.release-url }}
+        run: |
+          set -euo pipefail
+          rc=0
+
+          expect() {
+            local case="$1" want="$2" got="$3"
+            if [[ "$got" == "$want" ]]; then
+              echo "ok: $case -> $got"
+            else
+              echo "::error::$case expected outcome '$want' but got '$got'"
+              rc=1
+            fi
+          }
+
+          expect "no access key"                    success "$NO_KEY"
+          expect "no access key, fail-on-error"     failure "$NO_KEY_STRICT"
+          expect "rejected key"                     success "$BAD_KEY"
+          expect "rejected key, fail-on-error"      failure "$BAD_KEY_STRICT"
+
+          # The skip path must not invent outputs.
+          if [[ -n "$NO_KEY_URL" ]]; then
+            echo "::error::skip path returned a release-url ('$NO_KEY_URL'); it must be empty"
+            rc=1
+          else
+            echo "ok: skip path left release-url empty"
+          fi
+
+          exit $rc
