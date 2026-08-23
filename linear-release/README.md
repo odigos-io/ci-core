@@ -37,10 +37,11 @@ jobs:
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `access-key` | no | | Pipeline access key, normally `secrets.LINEAR_ACCESS_KEY`. Empty skips the sync |
-| `version` | yes | | Version the Linear release is named after, e.g. `v1.4.2` |
+| `version` | yes | | Version the release is keyed on, e.g. `v1.4.2` |
+| `name` | no | short SHA | Display name in Linear. Pass the tag, or releases read `3ba603d` |
 | `base-ref` | no | | Start of the commit scan, **exclusive** — the previous release tag, if it exists |
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
-| `issue-pattern` | no | odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
+| `issue-pattern` | no | all odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
 | `release-notes` | no | | Path to a markdown file to use as the release notes |
 | `dry-run` | no | `false` | Scan and read, but make no changes in Linear |
 | `fail-on-error` | no | `false` | Fail the step instead of warning when the sync cannot run |
