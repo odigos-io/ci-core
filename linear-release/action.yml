@@ -39,6 +39,13 @@ inputs:
       explicitly — left empty, Linear names the release after the short commit
       SHA instead, which is almost never what a tagged release wants.
     required: true
+  name:
+    description: >
+      Display name for the release in Linear. Left empty the CLI names it after
+      the short commit SHA, so a release reads "3ba603d" rather than "v1.6.2".
+      Targeting is always by `version`, never by name.
+    required: false
+    default: ""
   base-ref:
     description: >
       Start of the commit scan, exclusive — `<base-ref>..HEAD`. Pass the
@@ -57,9 +64,10 @@ inputs:
       commit subjects. Without this the CLI only detects keys preceded by a
       magic word ("fixes RUN-1", "part of RUN-1"), so a bare or parenthesised
       key is invisible — which is how most of our commits are written. The
-      default covers the odigos team keys.
+      default covers every odigos team key; keep the key in capture group 1 if
+      you override it.
     required: false
-    default: '((?:CORE|PLAT|PRD|RUN|GEN|DEVOPS|SEC)-[0-9]+)'
+    default: '\b((?:DEVOPS|RUMBA|CORE|PLAT|PRD|RUN|GEN|SEC|DES)-[0-9]+)'
   release-notes:
     description: >
       Path to a markdown file whose contents become the release notes in
@@ -153,6 +161,7 @@ runs:
       with:
         access_key: ${{ inputs.access-key }}
         command: sync
+        name: ${{ inputs.name }}
         version: ${{ inputs.version }}
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
