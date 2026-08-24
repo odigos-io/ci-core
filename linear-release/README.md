@@ -58,6 +58,8 @@ jobs:
 
 **Give it its own job.** Two reasons: the third-party CLI it downloads should not run beside a release job's credentials, and the runner resolves remote actions during job *setup*, before `continue-on-error` can catch anything — in the tagging job that would fail the release outright.
 
+**`base-ref` is resolved to the fork point when it is not an ancestor.** The highest tag by semver usually lives on a release branch, so a minor cut from the default branch is handed a ref it cannot reach; scanning `<merge-base>..HEAD` gives exactly what this release ships that the last one did not.
+
 **`base-ref` is often not on your branch.** `tag-and-release` reports the highest tag by semver, which usually lives on a release branch — so a minor cut from the default branch gets a ref it cannot reach, and an unguarded scan fails outright. The action drops such a ref with a warning and lets Linear pick the baseline. It also needs `fetch-depth: 0` to resolve one at all.
 
 **Failures are otherwise swallowed.** This runs after the release is published, so a Linear problem warns rather than turning the job red. Look for the warning annotation. `fail-on-error: "true"` opts out; an unset secret is a warning either way.

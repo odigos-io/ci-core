@@ -116,14 +116,21 @@ runs:
       run: |
         set -euo pipefail
 
-        # A base-ref that is not on this branch's history makes the scan fail
-        # outright. That is the normal case, not an edge one: the highest tag by
-        # semver usually lives on a release branch, so a minor cut from the
-        # default branch gets handed a ref it cannot reach. Drop it and let
-        # Linear choose its own baseline rather than losing the whole sync.
+        # The caller passes the highest tag by semver, which for a minor cut from
+        # the default branch lives on a release branch and is therefore not an
+        # ancestor of HEAD. Scanning from it fails outright, so resolve it to the
+        # fork point instead: <merge-base>..HEAD is everything this release ships
+        # that the previous one did not. On a release branch the ref is already an
+        # ancestor and merge-base returns it unchanged.
         if [[ -n "${BASE_REF}" ]] && ! git merge-base --is-ancestor "${BASE_REF}" HEAD 2>/dev/null; then
-          echo "::warning::linear-release: base-ref ${BASE_REF} is unresolvable or not an ancestor of HEAD; letting Linear choose the scan baseline."
-          BASE_REF=""
+          FORK_POINT="$(git merge-base "${BASE_REF}" HEAD 2>/dev/null || true)"
+          if [[ -n "${FORK_POINT}" ]]; then
+            echo "::notice::linear-release: base-ref ${BASE_REF} is not an ancestor of HEAD; scanning from the fork point ${FORK_POINT} instead."
+            BASE_REF="${FORK_POINT}"
+          else
+            echo "::warning::linear-release: base-ref ${BASE_REF} is unresolvable; letting Linear choose the scan baseline."
+            BASE_REF=""
+          fi
         fi
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
