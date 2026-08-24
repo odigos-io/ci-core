@@ -62,14 +62,22 @@ jobs:
           fail-on-error: "true"
 
       # A tag that exists but lives on another branch is the shape that broke a
-      # real release: it must be dropped, not passed through and not fatal.
-      - name: A non-ancestor base-ref is dropped, not fatal
+      # real release: it must resolve to the fork point, not fail.
+      - name: A non-ancestor base-ref resolves to the fork point
         id: stray-base-ref
         uses: ./linear-release
         with:
           access-key: ""
           version: v0.0.0-test
           base-ref: v1.4.2
+
+      - name: An unresolvable base-ref is dropped, not fatal
+        id: bogus-base-ref
+        uses: ./linear-release
+        with:
+          access-key: ""
+          version: v0.0.0-test
+          base-ref: no-such-ref-anywhere
 
       - name: A missing release-notes file is dropped, not fatal
         id: stray-notes
@@ -87,6 +95,7 @@ jobs:
           BAD_KEY_STRICT: ${{ steps.bad-key-strict.outcome }}
           STRAY_BASE_REF: ${{ steps.stray-base-ref.outcome }}
           STRAY_NOTES: ${{ steps.stray-notes.outcome }}
+          BOGUS_BASE_REF: ${{ steps.bogus-base-ref.outcome }}
           NO_KEY_URL: ${{ steps.no-key.outputs.release-url }}
         run: |
           set -euo pipefail
@@ -108,6 +117,7 @@ jobs:
           expect "rejected key, fail-on-error"      failure "$BAD_KEY_STRICT"
           expect "non-ancestor base-ref"            success "$STRAY_BASE_REF"
           expect "missing release-notes file"       success "$STRAY_NOTES"
+          expect "unresolvable base-ref"            success "$BOGUS_BASE_REF"
 
           # The skip path must not invent outputs.
           if [[ -n "$NO_KEY_URL" ]]; then
