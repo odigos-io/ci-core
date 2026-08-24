@@ -28,6 +28,12 @@ inputs:
     default: "false"
 
 outputs:
+  start_sha:
+    description: "First commit of the release range. Use it as linear-release's base-ref."
+    value: ${{ steps.shas.outputs.start_sha }}
+  end_sha:
+    description: "Last commit of the release range."
+    value: ${{ steps.shas.outputs.end_sha }}
   release_notes:
     description: "Generated release notes (full content of release-notes.md)"
     value: ${{ steps.notes.outputs.release_notes }}
