@@ -35,15 +35,14 @@ inputs:
     default: ""
   version:
     description: >
-      Version the Linear release is named after, e.g. `v1.4.2`. Pass it
-      explicitly — left empty, Linear names the release after the short commit
-      SHA instead, which is almost never what a tagged release wants.
+      The released tag, e.g. `v1.4.2`. Becomes the release title; the pill
+      beside it carries the commit SHA. Two tags on one commit therefore
+      resolve to the same release.
     required: true
   name:
     description: >
-      Display name for the release in Linear. Left empty the CLI names it after
-      the short commit SHA, so a release reads "3ba603d" rather than "v1.6.2".
-      Targeting is always by `version`, never by name.
+      Overrides the release title. Defaults to `version` (the tag), which is
+      almost always what you want.
     required: false
     default: ""
   base-ref:
@@ -128,6 +127,9 @@ runs:
         fi
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
+        # Linear renders name as the title and version as the pill beside it.
+        echo "short-sha=$(git rev-parse --short HEAD 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
         # Losing the notes is not worth losing the sync over.
         if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
           echo "::warning::linear-release: release-notes file ${RELEASE_NOTES} does not exist; syncing without notes."
@@ -161,8 +163,8 @@ runs:
       with:
         access_key: ${{ inputs.access-key }}
         command: sync
-        name: ${{ inputs.name }}
-        version: ${{ inputs.version }}
+        name: ${{ inputs.name != '' && inputs.name || inputs.version }}
+        version: ${{ steps.guard.outputs.short-sha != '' && steps.guard.outputs.short-sha || inputs.version }}
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
         issue_pattern: ${{ inputs.issue-pattern }}
