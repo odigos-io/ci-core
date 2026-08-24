@@ -37,8 +37,8 @@ jobs:
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `access-key` | no | | Pipeline access key, normally `secrets.LINEAR_ACCESS_KEY`. Empty skips the sync |
-| `version` | yes | | Version the release is keyed on, e.g. `v1.4.2` |
-| `name` | no | short SHA | Display name in Linear. Pass the tag, or releases read `3ba603d` |
+| `version` | yes | | The released tag, e.g. `v1.4.2`. Becomes the release title |
+| `name` | no | the tag | Overrides the title. Rarely needed |
 | `base-ref` | no | | Start of the commit scan, **exclusive** — the previous release tag, if it exists |
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
 | `issue-pattern` | no | all odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
@@ -51,6 +51,8 @@ jobs:
 `release-id`, `release-name`, `release-version`, `release-url`. All four are empty when nothing was created or updated — a skip, a failure, a `dry-run`, and a sync that matched no issues all look the same. Guard with `!= ''`.
 
 ## Things that will bite you
+
+**The tag is the title; the commit SHA is the pill.** `version` is also what a sync targets, so two tags on one commit resolve to a single release.
 
 **The access key picks the pipeline, nothing here does.** A key belongs to exactly one pipeline, so a repo given the wrong key files its releases in someone else's. An org-wide `LINEAR_ACCESS_KEY` therefore sends every repo to the same pipeline; repos that need their own want a repo-level secret.
 
