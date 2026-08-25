@@ -85,8 +85,8 @@ runs:
           # tool cannot resolve via the GitHub commits API.
           tag_commit_sha() { git rev-parse "${1}^{commit}"; }
 
-          # Only consider exact semver release tags (vX.Y.Z or vX.Y.Z-rcN), not namespaced ones like profiles/v1.17.0
-          is_release_tag() { [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; }
+          # Only consider exact semver release tags (vX.Y.Z, -rcN or -preN), not namespaced ones like profiles/v1.17.0
+          is_release_tag() { [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|pre)\.?[0-9]+)?$ ]]; }
           list_merged_release_tags() {
             git tag --merged HEAD --sort=-version:refname | while read t; do is_release_tag "$t" && echo "$t"; done
           }
@@ -123,6 +123,40 @@ runs:
               START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
               echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
               echo "Scenario: first RC for minor, PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
+            fi
+
+          # --- Pre tag: vX.Y.Z-preN (a dot, as in -pre.N, is also accepted) ---
+          elif [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-pre\.?([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            PRE_NUM="${BASH_REMATCH[4]}"
+            BASE="${MAJOR}.${MINOR}.${PATCH}"
+
+            # Previous pre for this minor: same vX.Y.Z-pre*, lower number, merged in HEAD
+            PREV_PRE_TAG=""
+            while read t; do
+              [[ "$t" == "$TAG" ]] && continue
+              if [[ "$t" =~ ^v${BASE}-pre\.?([0-9]+)$ ]]; then
+                N="${BASH_REMATCH[1]}"
+                if [[ "$N" -lt "$PRE_NUM" ]]; then
+                  PREV_PRE_TAG="$t"
+                  break
+                fi
+              fi
+            done < <(list_merged_release_tags)
+
+            if [ -n "$PREV_PRE_TAG" ]; then
+              START_SHA=$(tag_commit_sha "$PREV_PRE_TAG")
+              echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+              echo "Scenario: pre after previous pre, PREV_PRE_TAG=$PREV_PRE_TAG"
+            else
+              # First pre for this minor: since the previous minor's branch point off main
+              PREV_MINOR=$((MINOR - 1))
+              PREV_RELEASE_BRANCH="origin/releases/v${MAJOR}.${PREV_MINOR}.0"
+              START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+              echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+              echo "Scenario: first pre for minor, PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
             fi
 
           # --- Stable vX.Y.0 (first stable for minor) ---
@@ -167,6 +201,12 @@ runs:
             echo "Unrecognized tag format, using merge-base with main"
             START_SHA=$(git merge-base origin/main HEAD)
             echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
+          fi
+
+          # An empty range yields blank notes and, downstream, a Linear release with
+          # no issues. That went unnoticed for every -pre tag, so say it out loud.
+          if [ "$(git rev-parse "${START_SHA}")" = "$(git rev-parse "${END_SHA}")" ]; then
+            echo "::warning::generate-release-notes: start_sha equals HEAD for ${TAG}; the range is empty and the notes will be blank."
           fi
 
       - name: Set up Go
