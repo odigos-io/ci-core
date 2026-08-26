@@ -67,6 +67,12 @@ inputs:
       you override it.
     required: false
     default: '\b((?:DEVOPS|RUMBA|CORE|PLAT|PRD|RUN|GEN|SEC|DES)-[0-9]+)'
+  links:
+    description: >
+      Links to attach to the release, one per line, each an absolute URL or
+      `Label=URL`. Appended without de-duplication, so a re-run adds them again.
+    required: false
+    default: ""
   release-notes:
     description: >
       Path to a markdown file whose contents become the release notes in
@@ -174,6 +180,7 @@ runs:
         version: ${{ steps.guard.outputs.short-sha != '' && steps.guard.outputs.short-sha || inputs.version }}
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
+        links: ${{ inputs.links }}
         issue_pattern: ${{ inputs.issue-pattern }}
         release_notes: ${{ steps.guard.outputs.release-notes }}
         dry_run: ${{ inputs.dry-run }}
