@@ -41,6 +41,7 @@ jobs:
 | `name` | no | the tag | Overrides the title. Rarely needed |
 | `base-ref` | no | | Start of the commit scan, **exclusive** — the previous release tag, if it exists |
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
+| `links` | no | | Links to attach, one per line: absolute URL or `Label=URL` |
 | `issue-pattern` | no | all odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
 | `release-notes` | no | | Path to a markdown file to use as the release notes |
 | `dry-run` | no | `false` | Scan and read, but make no changes in Linear |
