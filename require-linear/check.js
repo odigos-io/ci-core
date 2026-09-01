@@ -150,6 +150,7 @@ async function gather({ repo, prNumber, token }) {
     const r = await api(`/repos/${repo}`, token);
     facts.squashTitle = r.squash_merge_commit_title || '';
     facts.allowsMerge = r.allow_merge_commit;
+    console.log(`DEBUG squash_merge_commit_title=${JSON.stringify(r.squash_merge_commit_title)} allow_merge_commit=${JSON.stringify(r.allow_merge_commit)} permissions=${JSON.stringify(r.permissions)}`);
   } catch (e) {
     console.log(`Could not read repo merge settings: ${e.message}`);
   }
