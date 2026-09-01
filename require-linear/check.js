@@ -4,8 +4,13 @@
 //
 // 118 of 129 org repos squash with COMMIT_OR_PR_TITLE, which takes the commit
 // title on a single-commit PR. A key living only in the PR title is dropped, so
-// it never reaches the default branch where the release scan reads it. We predict
-// the subject the merge will produce and check that instead.
+// it never reaches the default branch where the release scan reads it.
+//
+// We cannot read a repo's merge settings — GitHub omits those fields for a token
+// without push rights, and no workflow permission grants it — and the merger picks
+// squash vs merge at merge time anyway. So the rule is deliberately conservative
+// and depends only on the commit count: on a single-commit PR the commit subject
+// is what can ship, so the key has to be there.
 //
 // Env: GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_REPOSITORY, GITHUB_TOKEN,
 //      ENFORCE ("false" warns instead of failing).
@@ -64,21 +69,16 @@ function hasKey(text, keys) {
   return keyRegex(keys).test(text || '');
 }
 
-/** The subject the merge will produce. COMMIT_OR_PR_TITLE is the interesting case:
- *  it takes the commit title only when the PR has a single commit. */
-function predictSubject({ squashTitle, prTitle, firstSubject, nCommits }) {
-  if (squashTitle === 'PR_TITLE') {
-    return { subject: prTitle, why: 'squash uses the PR title' };
-  }
-  if (String(nCommits) === '1') {
-    return { subject: firstSubject, why: 'squash uses the commit title on a single-commit PR' };
-  }
-  return { subject: prTitle, why: 'squash uses the PR title on a multi-commit PR' };
+/** What has to carry the key, given only the commit count. */
+function requiredCarrier({ prTitle, firstSubject, nCommits }) {
+  return String(nCommits) === '1'
+    ? { subject: firstSubject, why: 'a single-commit PR squashes to the commit subject' }
+    : { subject: prTitle, why: 'a multi-commit PR squashes to the PR title' };
 }
 
 /** @returns {{ok: boolean, level: 'none'|'notice'|'warning'|'error', message: string}} */
 function decide(facts) {
-  const { prTitle, prBody, prBranch, squashTitle, allowsMerge, enforce } = facts;
+  const { prTitle, prBody, prBranch, nCommits, enforce } = facts;
   const keys = facts.keys || loadKeys();   // facts.keys is a test seam, not an input
 
   // The long-standing gate: a key has to be somewhere.
@@ -97,28 +97,19 @@ function decide(facts) {
     };
   }
 
-  // Without merge settings there is nothing to predict; never fail on that.
-  if (!squashTitle) {
-    return { ok: true, level: 'notice', message: `Found in the ${found}. Repo merge settings unavailable; skipping the merge-subject check.` };
+  // Without the commit list there is nothing to check; never fail on an API hiccup.
+  if (!nCommits) {
+    return { ok: true, level: 'notice', message: `Found in the ${found}. Could not read the PR's commits; skipping the merge-subject check.` };
   }
 
-  const { subject, why } = predictSubject(facts);
+  const { subject, why } = requiredCarrier(facts);
   if (hasKey(subject, keys)) {
     return { ok: true, level: 'none', message: `Found in the ${found}, and it survives the merge — ${why}.` };
   }
 
   const problem =
-    `the Linear key would NOT reach the merge commit subject (${why}: "${subject}"). ` +
+    `the Linear key would not reach the merge commit subject (${why}: "${subject}"). ` +
     'The release scan reads commits on the default branch, so this association would be lost.';
-
-  // A merge commit keeps the branch name in its subject.
-  if ((allowsMerge === true || allowsMerge === 'true') && hasKey(prBranch, keys)) {
-    return {
-      ok: true,
-      level: 'notice',
-      message: `${problem} A merge commit would still carry the branch name, so it survives if this is merged rather than squashed.`,
-    };
-  }
 
   if (enforce === 'false') {
     return {
@@ -146,14 +137,6 @@ async function api(pathname, token) {
  *  rather than blocking a PR on an API hiccup. */
 async function gather({ repo, prNumber, token }) {
   const facts = {};
-  try {
-    const r = await api(`/repos/${repo}`, token);
-    facts.squashTitle = r.squash_merge_commit_title || '';
-    facts.allowsMerge = r.allow_merge_commit;
-    console.log(`DEBUG squash_merge_commit_title=${JSON.stringify(r.squash_merge_commit_title)} allow_merge_commit=${JSON.stringify(r.allow_merge_commit)} permissions=${JSON.stringify(r.permissions)}`);
-  } catch (e) {
-    console.log(`Could not read repo merge settings: ${e.message}`);
-  }
   try {
     const commits = await api(`/repos/${repo}/pulls/${prNumber}/commits?per_page=100`, token);
     facts.nCommits = String(commits.length);
@@ -206,4 +189,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { decide, predictSubject, hasKey, loadKeys, shouldSkip };
+module.exports = { decide, requiredCarrier, hasKey, loadKeys, shouldSkip };

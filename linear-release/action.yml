@@ -7,8 +7,9 @@ description: "Sync a released tag into a Linear release pipeline, attaching the 
 #
 # Out of the box the CLI only recognises an issue key preceded by a magic word
 # ("fixes RUN-1", "part of RUN-1") or a `(#123)` pull request reference. A key
-# sitting on its own in the subject is NOT detected — hence the `issue-pattern`
-# default below, which is what makes our usual `feat(x): thing (RUN-1)` link.
+# sitting on its own in the subject is NOT detected — hence the issue pattern
+# built from `linear-team-keys`, which is what makes our usual
+# `feat(x): thing (RUN-1)` link.
 #
 # Which Linear pipeline a release lands in is decided by the access key, not by
 # anything here — a pipeline access key belongs to exactly one pipeline.
@@ -55,17 +56,6 @@ inputs:
     default: ""
   include-paths:
     description: "Comma-separated globs restricting which commits count, e.g. `frontend/**,common/**`. For monorepos."
-    required: false
-    default: ""
-  issue-pattern:
-    description: >
-      Regex whose FIRST capture group is a Linear issue key, matched against
-      commit subjects. Without this the CLI only detects keys preceded by a
-      magic word ("fixes RUN-1", "part of RUN-1"), so a bare or parenthesised
-      key is invisible — which is how most of our commits are written. Left
-      empty it is built from the repo-root `linear-team-keys` file, the single
-      source shared with `require-linear`. Keep the key in capture group 1 if
-      you override it.
     required: false
     default: ""
   links:
@@ -120,23 +110,19 @@ runs:
         VERSION: ${{ inputs.version }}
         BASE_REF: ${{ inputs.base-ref }}
         RELEASE_NOTES: ${{ inputs.release-notes }}
-        ISSUE_PATTERN: ${{ inputs.issue-pattern }}
       run: |
         set -euo pipefail
 
-        # One source for the team keys, shared with require-linear. No hardcoded
-        # fallback: a stale duplicate that disagrees with the file is the drift
-        # that file exists to end. Unreadable means no custom pattern, which only
-        # costs us the bare-key detection.
-        if [[ -z "${ISSUE_PATTERN}" ]]; then
-          KEYS=$(tr -d '[:space:]' < "${GITHUB_ACTION_PATH}/../linear-team-keys" 2>/dev/null || true)
-          if [[ -n "${KEYS}" ]]; then
-            ISSUE_PATTERN="\\b((?:${KEYS})-[0-9]+)"
-          else
-            echo "::warning::linear-release: could not read linear-team-keys; falling back to upstream's built-in issue detection."
-          fi
+        # Built from linear-team-keys, shared with require-linear. Not an input:
+        # which teams exist belongs to the workspace, not to the calling repo.
+        # Upstream detects only keys behind a magic word, so without this a bare
+        # or parenthesised key — how we write them — is invisible.
+        KEYS=$(tr -d '[:space:]' < "${GITHUB_ACTION_PATH}/../linear-team-keys" 2>/dev/null || true)
+        if [[ -n "${KEYS}" ]]; then
+          echo "issue-pattern=\\b((?:${KEYS})-[0-9]+)" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::linear-release: could not read linear-team-keys; falling back to upstream's built-in issue detection."
         fi
-        echo "issue-pattern=${ISSUE_PATTERN}" >> "$GITHUB_OUTPUT"
 
         # The caller passes the highest tag by semver, which for a minor cut from
         # the default branch lives on a release branch and is therefore not an
