@@ -42,7 +42,6 @@ jobs:
 | `base-ref` | no | | Start of the commit scan, **exclusive** — the previous release tag, if it exists |
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
 | `links` | no | | Links to attach, one per line: absolute URL or `Label=URL` |
-| `issue-pattern` | no | all odigos team keys | Regex whose first capture group is an issue key, matched against commit subjects |
 | `release-notes` | no | | Path to a markdown file to use as the release notes |
 | `dry-run` | no | `false` | Scan and read, but make no changes in Linear |
 | `fail-on-error` | no | `false` | Fail the step instead of warning when the sync cannot run |
@@ -65,7 +64,7 @@ jobs:
 
 **Failures are otherwise swallowed.** This runs after the release is published, so a Linear problem warns rather than turning the job red. Look for the warning annotation. `fail-on-error: "true"` opts out; an unset secret is a warning either way.
 
-**A bare issue key in a commit subject is NOT detected by default.** Upstream only matches a key preceded by a magic word (`fixes RUN-1`, `part of RUN-1`) or a `(#123)` pull request reference. `feat(x): thing (RUN-1)` matches nothing on its own — which is why `issue-pattern` defaults to the odigos team keys here. If you override it, keep the key in **capture group 1**; the pattern is applied to the subject only, never the body.
+**A bare issue key in a commit subject is NOT detected by default.** Upstream only matches a key preceded by a magic word (`fixes RUN-1`, `part of RUN-1`) or a `(#123)` pull request reference. `feat(x): thing (RUN-1)` matches nothing on its own — so this action always passes an issue pattern built from the repo-root `linear-team-keys` file, shared with `require-linear`. It is not configurable: which teams exist belongs to the workspace, not to the calling repo.
 
 **Zero issues means zero auto-generated notes.** Linear generates notes from the issues attached to a release, so a release that matched none shows nothing. Pass `release-notes` with a file — e.g. the body GitHub already generated for the tag — to have something either way.
 

@@ -19,14 +19,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: node --test require-linear/test.js
-
-  # TEMPORARY: proves that consuming the action from a subdirectory downloads the
-  # whole repo, so check.js can read ../linear-team-keys. `uses:` takes no
-  # expressions, hence the hardcoded branch.
-  remote-consumption:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: odigos-io/ci-core/require-linear@run-1088-require-linear-commit

@@ -7,7 +7,7 @@ const assert   = require('node:assert/strict');
 const fs       = require('node:fs');
 const path     = require('node:path');
 
-const { decide, predictSubject, hasKey, loadKeys, shouldSkip } = require('./check');
+const { decide, requiredCarrier, hasKey, loadKeys, shouldSkip } = require('./check');
 
 // The action defaults to this file, so the tests should too — if a key is added
 // there and the regex cannot cope, these fail rather than production.
@@ -19,8 +19,6 @@ const base = {
   prTitle: 'RUN-1 | fix(x): thing',
   prBody: '',
   prBranch: 'x',
-  squashTitle: 'COMMIT_OR_PR_TITLE',
-  allowsMerge: false,   // the API returns a JSON boolean
   nCommits: '1',
   firstSubject: 'RUN-1 | fix(x): thing',
   keys: KEYS,
@@ -46,17 +44,15 @@ test('fails when the key is only in the body, since it will not survive', () => 
 });
 
 // ---------------------------------------------------------------------------
-// Which subject the merge produces
+// What has to carry the key
 // ---------------------------------------------------------------------------
 
-test('PR_TITLE repos always use the PR title', () => {
-  assert.equal(predictSubject({ squashTitle: 'PR_TITLE', prTitle: 'a', firstSubject: 'b', nCommits: '1' }).subject, 'a');
-  assert.equal(predictSubject({ squashTitle: 'PR_TITLE', prTitle: 'a', firstSubject: 'b', nCommits: '5' }).subject, 'a');
+test('a single-commit PR must carry it in the commit subject', () => {
+  assert.equal(requiredCarrier({ prTitle: 'a', firstSubject: 'b', nCommits: '1' }).subject, 'b');
 });
 
-test('COMMIT_OR_PR_TITLE uses the commit title only on a single-commit PR', () => {
-  assert.equal(predictSubject({ squashTitle: 'COMMIT_OR_PR_TITLE', prTitle: 'a', firstSubject: 'b', nCommits: '1' }).subject, 'b');
-  assert.equal(predictSubject({ squashTitle: 'COMMIT_OR_PR_TITLE', prTitle: 'a', firstSubject: 'b', nCommits: '2' }).subject, 'a');
+test('a multi-commit PR must carry it in the PR title', () => {
+  assert.equal(requiredCarrier({ prTitle: 'a', firstSubject: 'b', nCommits: '2' }).subject, 'a');
 });
 
 // ---------------------------------------------------------------------------
@@ -67,7 +63,7 @@ test('single-commit PR with the key only in the PR title fails', () => {
   const r = decideWith({ firstSubject: 'fix(x): thing' });
   assert.equal(r.ok, false);
   assert.equal(r.level, 'error');
-  assert.match(r.message, /would NOT reach the merge commit subject/);
+  assert.match(r.message, /would not reach the merge commit subject/i);
 });
 
 test('same case passes clean once the commit carries the key', () => {
@@ -82,27 +78,21 @@ test('multi-commit PR is fine on the PR title alone', () => {
 // Escape hatches
 // ---------------------------------------------------------------------------
 
-test('accepts allowsMerge as a string too, in case a caller passes one', () => {
-  const r = decideWith({ prTitle: 'fix: x', firstSubject: 'fix: x', prBranch: 'run-1-x', allowsMerge: 'true' });
-  assert.equal(r.level, 'notice');
-});
-
-test('a merge-commit repo is saved by the branch name', () => {
-  const r = decideWith({ prTitle: 'fix: x', firstSubject: 'fix: x', prBranch: 'run-1-x', allowsMerge: true });
-  assert.equal(r.ok, true);
-  assert.equal(r.level, 'notice');
-});
-
 test('opting out downgrades the failure to a warning', () => {
   const r = decideWith({ firstSubject: 'fix(x): thing', enforce: 'false' });
   assert.equal(r.ok, true);
   assert.equal(r.level, 'warning');
 });
 
-test('unknown merge settings degrade to a notice, never a failure', () => {
-  const r = decideWith({ squashTitle: '', firstSubject: 'fix(x): thing' });
+test('an unreadable commit list degrades to a notice, never a failure', () => {
+  const r = decideWith({ nCommits: undefined, firstSubject: 'fix(x): thing' });
   assert.equal(r.ok, true);
   assert.equal(r.level, 'notice');
+});
+
+test('a branch-name-only key still fails, since the merge method is unknowable', () => {
+  const r = decideWith({ prTitle: 'fix: x', firstSubject: 'fix: x', prBranch: 'run-1-x' });
+  assert.equal(r.ok, false);
 });
 
 // ---------------------------------------------------------------------------
