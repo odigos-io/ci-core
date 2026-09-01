@@ -117,7 +117,8 @@ runs:
         # which teams exist belongs to the workspace, not to the calling repo.
         # Upstream detects only keys behind a magic word, so without this a bare
         # or parenthesised key — how we write them — is invisible.
-        KEYS=$(tr -d '[:space:]' < "${GITHUB_ACTION_PATH}/../linear-team-keys" 2>/dev/null || true)
+        KEYS=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "${GITHUB_ACTION_PATH}/../linear-team-keys" 2>/dev/null \
+               | grep -E '^[A-Z][A-Z0-9]*$' | paste -sd'|' -)
         if [[ -n "${KEYS}" ]]; then
           echo "issue-pattern=\\b((?:${KEYS})-[0-9]+)" >> "$GITHUB_OUTPUT"
         else
