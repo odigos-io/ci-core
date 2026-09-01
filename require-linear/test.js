@@ -9,6 +9,16 @@ const path     = require('node:path');
 
 const { decide, requiredCarrier, hasKey, loadKeys, shouldSkip } = require('./check');
 
+// loadKeys() reads a fixed path, so exercise its validation through a temp file.
+const os = require('node:os');
+function loadKeysFrom(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keys-'));
+  fs.writeFileSync(path.join(dir, 'linear-team-keys'), contents);
+  fs.mkdirSync(path.join(dir, 'require-linear'));
+  fs.copyFileSync(path.join(__dirname, 'check.js'), path.join(dir, 'require-linear', 'check.js'));
+  return require(path.join(dir, 'require-linear', 'check.js')).loadKeys();
+}
+
 // The action defaults to this file, so the tests should too — if a key is added
 // there and the regex cannot cope, these fail rather than production.
 const KEYS = fs
@@ -144,6 +154,14 @@ test('skips any Bot-type author, and the named bot accounts', () => {
 // ---------------------------------------------------------------------------
 // Team keys come from the file, with no hardcoded fallback
 // ---------------------------------------------------------------------------
+
+test('a malformed key list is rejected rather than matching everything', () => {
+  // "A||B" makes \b(A||B)-[1-9] match "UTF-8", which would pass every PR.
+  assert.equal(hasKey('chore: bump to UTF-8', 'DEVOPS||RUN'), true, 'precondition: the empty alternative does match');
+  assert.throws(() => loadKeysFrom('DEVOPS||RUN'), /separated by/);
+  assert.throws(() => loadKeysFrom('RUN|'), /separated by/);
+  assert.throws(() => loadKeysFrom('run|core'), /separated by/);
+});
 
 test('loadKeys reads the shared file', () => {
   assert.equal(loadKeys(), KEYS);

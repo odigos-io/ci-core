@@ -36,6 +36,11 @@ function loadKeys() {
   }
   const keys = raw.replace(/\s/g, '');
   if (!keys) throw new Error(`${KEYS_FILE} is empty`);
+  // An empty alternative — a stray "||" or a trailing "|" — makes the key regex
+  // match almost anything, which would pass every PR instead of failing it.
+  if (!/^[A-Z][A-Z0-9]*(\|[A-Z][A-Z0-9]*)*$/.test(keys)) {
+    throw new Error(`${KEYS_FILE} must be uppercase keys separated by "|", got: ${keys}`);
+  }
   return keys;
 }
 
