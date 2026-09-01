@@ -1,89 +1,25 @@
 name: Require Linked Linear Issue
-description: Ensures pull requests reference a Linear issue in the PR title, body, or branch name before merging
+description: Ensures pull requests reference a Linear issue that survives the merge into the default branch
+
+# Most of the org squashes with COMMIT_OR_PR_TITLE, which takes the commit title on a
+# single-commit PR — so a key living only in the PR title never reaches main, where the
+# release scan reads it. check.js predicts the subject the merge will produce and checks
+# that; it also owns the skip rules and the GitHub lookups.
+
+inputs:
+  enforce-commit-subject:
+    description: >
+      Fail when the key would not survive the merge. "false" downgrades it to a
+      warning while a repo is being cleaned up.
+    required: false
+    default: "true"
 
 runs:
   using: composite
   steps:
-    - name: Skip when the event carries no pull request
-      id: context
-      shell: bash
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-      run: |
-        set -euo pipefail
-
-        # merge_group runs against a gh-readonly-queue ref and carries no pull request
-        # payload, so title, body and branch all read as empty. Without this the pattern
-        # matches nothing and the check fails every queue entry instead of passing it.
-        # The policy is enforced on the pull_request events that run before the queue.
-        case "$EVENT_NAME" in
-          pull_request|pull_request_target) ;;
-          *)
-            echo "Event $EVENT_NAME carries no pull request - Linear check skipped."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            ;;
-        esac
-
-    - name: Skip Linear check for bots
-      id: bots
-      if: ${{ steps.context.outputs.skip != 'true' }}
-      shell: bash
-      env:
-        PR_USER: ${{ github.event.pull_request.user.login }}
-        PR_USER_TYPE: ${{ github.event.pull_request.user.type }}
-      run: |
-        set -euo pipefail
-
-        BOT_ACCOUNTS=(
-          "dependabot[bot]"
-          "renovate[bot]"
-          "odigos-bot"
-          "github-actions[bot]"
-          "keyval-release-bot"
-        )
-
-        if [ "$PR_USER_TYPE" = "Bot" ]; then
-          echo "PR opened by bot user $PR_USER - Linear check skipped."
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        for bot in "${BOT_ACCOUNTS[@]}"; do
-          if [ "$PR_USER" = "$bot" ]; then
-            echo "PR opened by $PR_USER - Linear check skipped."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-        done
-
     - name: Ensure PR links a Linear issue
-      if: ${{ steps.context.outputs.skip != 'true' && steps.bots.outputs.skip != 'true' }}
       shell: bash
       env:
-        PR_TITLE: ${{ github.event.pull_request.title }}
-        PR_BODY: ${{ github.event.pull_request.body }}
-        PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-      run: |
-        set -euo pipefail
-
-        # Same case-insensitive pattern for title, body, and branch.
-        # Prefix must be an allowed Linear team; issue number must not start with 0.
-        PATTERN="(CORE-|PLAT-|PRD-|RUN-|GEN-|DEVOPS-|SEC-)[1-9][0-9]*"
-
-        if printf '%s\n' "$PR_TITLE" | grep -qiE "$PATTERN"; then
-          echo "✅ Linear issue reference found in PR title"
-          exit 0
-        fi
-
-        if printf '%s\n' "$PR_BODY" | grep -qiE "$PATTERN"; then
-          echo "✅ Linear issue reference found in PR body"
-          exit 0
-        fi
-
-        if printf '%s\n' "$PR_BRANCH" | grep -qiE "$PATTERN"; then
-          echo "✅ Linear issue reference found in branch name"
-          exit 0
-        fi
-
-        echo "❌ No Linear issue reference found in PR title, body, or branch"
-        echo "Include an issue ID in the PR title, body (e.g. Fixes CORE-123), or branch name."
-        exit 1
+        ENFORCE: ${{ inputs.enforce-commit-subject }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node "${{ github.action_path }}/check.js"

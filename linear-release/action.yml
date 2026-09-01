@@ -62,11 +62,12 @@ inputs:
       Regex whose FIRST capture group is a Linear issue key, matched against
       commit subjects. Without this the CLI only detects keys preceded by a
       magic word ("fixes RUN-1", "part of RUN-1"), so a bare or parenthesised
-      key is invisible — which is how most of our commits are written. The
-      default covers every odigos team key; keep the key in capture group 1 if
+      key is invisible — which is how most of our commits are written. Left
+      empty it is built from the repo-root `linear-team-keys` file, the single
+      source shared with `require-linear`. Keep the key in capture group 1 if
       you override it.
     required: false
-    default: '\b((?:DEVOPS|RUMBA|CORE|PLAT|PRD|RUN|GEN|SEC|DES)-[0-9]+)'
+    default: ""
   links:
     description: >
       Links to attach to the release, one per line, each an absolute URL or
@@ -119,8 +120,23 @@ runs:
         VERSION: ${{ inputs.version }}
         BASE_REF: ${{ inputs.base-ref }}
         RELEASE_NOTES: ${{ inputs.release-notes }}
+        ISSUE_PATTERN: ${{ inputs.issue-pattern }}
       run: |
         set -euo pipefail
+
+        # One source for the team keys, shared with require-linear. No hardcoded
+        # fallback: a stale duplicate that disagrees with the file is the drift
+        # that file exists to end. Unreadable means no custom pattern, which only
+        # costs us the bare-key detection.
+        if [[ -z "${ISSUE_PATTERN}" ]]; then
+          KEYS=$(tr -d '[:space:]' < "${GITHUB_ACTION_PATH}/../linear-team-keys" 2>/dev/null || true)
+          if [[ -n "${KEYS}" ]]; then
+            ISSUE_PATTERN="\\b((?:${KEYS})-[0-9]+)"
+          else
+            echo "::warning::linear-release: could not read linear-team-keys; falling back to upstream's built-in issue detection."
+          fi
+        fi
+        echo "issue-pattern=${ISSUE_PATTERN}" >> "$GITHUB_OUTPUT"
 
         # The caller passes the highest tag by semver, which for a minor cut from
         # the default branch lives on a release branch and is therefore not an
@@ -181,7 +197,7 @@ runs:
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
         links: ${{ inputs.links }}
-        issue_pattern: ${{ inputs.issue-pattern }}
+        issue_pattern: ${{ steps.guard.outputs.issue-pattern }}
         release_notes: ${{ steps.guard.outputs.release-notes }}
         dry_run: ${{ inputs.dry-run }}
         # Pinned here rather than inherited: upstream's own cli_version default
