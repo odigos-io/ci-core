@@ -3,13 +3,28 @@ description: |
   Reads pull request labels to decide Docker build options.
   Supported labels: "build: arm" (also build linux/arm64) and "build: no-cache"
   (build without Docker layer cache). Defaults to linux/amd64 with cache enabled.
+  Optional inputs override label resolution (useful for release workflows).
+
+inputs:
+  platforms:
+    description: >
+      If set, use this platforms value instead of resolving from PR labels
+      (e.g. linux/amd64,linux/arm64).
+    required: false
+    default: ""
+  no-cache:
+    description: >
+      If set to 'true' or 'false', use this value instead of resolving from
+      PR labels.
+    required: false
+    default: ""
 
 outputs:
   build-arm:
-    description: "true if the PR has the 'build: arm' label"
+    description: "true if arm64 is included in platforms"
     value: ${{ steps.resolve.outputs.build-arm }}
   no-cache:
-    description: "true if the PR has the 'build: no-cache' label"
+    description: "true if the build should skip Docker layer cache"
     value: ${{ steps.resolve.outputs.no-cache }}
   platforms:
     description: "Docker platforms string (linux/amd64 or linux/amd64,linux/arm64)"
@@ -24,6 +39,8 @@ runs:
       env:
         # Comma-joined label names; empty outside pull_request events.
         PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        OVERRIDE_PLATFORMS: ${{ inputs.platforms }}
+        OVERRIDE_NO_CACHE: ${{ inputs.no-cache }}
       run: |
         set -euo pipefail
 
@@ -48,16 +65,37 @@ runs:
           PLATFORMS="linux/amd64"
         fi
 
+        if [ -n "${OVERRIDE_PLATFORMS}" ]; then
+          PLATFORMS="${OVERRIDE_PLATFORMS}"
+          if [[ "${PLATFORMS}" == *"arm64"* ]]; then
+            BUILD_ARM=true
+          else
+            BUILD_ARM=false
+          fi
+        fi
+
+        if [ -n "${OVERRIDE_NO_CACHE}" ]; then
+          NO_CACHE="${OVERRIDE_NO_CACHE}"
+        fi
+
         echo "build-arm=${BUILD_ARM}" >> "$GITHUB_OUTPUT"
         echo "no-cache=${NO_CACHE}" >> "$GITHUB_OUTPUT"
         echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
 
         echo "## Build options from PR labels" >> "$GITHUB_STEP_SUMMARY"
         echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Option | Value | Label |" >> "$GITHUB_STEP_SUMMARY"
-        echo "|--------|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Platforms | \`${PLATFORMS}\` | \`build: arm\` → ${BUILD_ARM} |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| No cache | \`${NO_CACHE}\` | \`build: no-cache\` → ${NO_CACHE} |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Option | Value | Source |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|--------|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+        if [ -n "${OVERRIDE_PLATFORMS}" ]; then
+          echo "| Platforms | \`${PLATFORMS}\` | input override |" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "| Platforms | \`${PLATFORMS}\` | \`build: arm\` → ${BUILD_ARM} |" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ -n "${OVERRIDE_NO_CACHE}" ]; then
+          echo "| No cache | \`${NO_CACHE}\` | input override |" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "| No cache | \`${NO_CACHE}\` | \`build: no-cache\` → ${NO_CACHE} |" >> "$GITHUB_STEP_SUMMARY"
+        fi
 
         echo "Platforms: ${PLATFORMS}"
         echo "No cache: ${NO_CACHE}"
