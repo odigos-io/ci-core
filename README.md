@@ -20,6 +20,8 @@
 1. [vulnerabilities-scanner](./vulnerabilities-scanner/README.md)
 2. [sign-oci](./sign-oci/README.md) — keyless cosign signing and SBOM attestation for published images
 3. [backfill-sign](./.github/workflows/backfill-sign.yml) — break-glass: sign an already-published digest after an outage forced an unsigned release
+4. [cve-triage](./cve-triage/README.md) — map HIGH/CRITICAL image findings to the repo and manifest that owns them, minus the exceptions ledger
+5. [cve-linear-sync](./cve-linear-sync/README.md) — one Linear issue per fix unit, delegated to Cursor; sweeps stalled ones
 
 ### Supply-chain signing
 See [SIGNING.md](./SIGNING.md) — how signatures are made (keyless/Fulcio), where they live, and how to verify.
