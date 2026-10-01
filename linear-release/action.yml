@@ -72,6 +72,14 @@ inputs:
       file is a warning, not an error.
     required: false
     default: ""
+  stage:
+    description: >
+      Move the release into this stage after syncing, e.g. "Released". A sync
+      lands a release in the pipeline's first started stage, so a scheduled
+      pipeline needs this to promote a stable release out of PRE/RC. Leave empty
+      on a continuous pipeline, which has only one stage.
+    required: false
+    default: ""
   dry-run:
     description: "Scan commits and read from Linear, but skip the create/update mutations."
     required: false
@@ -144,7 +152,10 @@ runs:
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
         # Linear renders name as the title and version as the pill beside it.
-        echo "short-sha=$(git rev-parse --short HEAD 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+        SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+        echo "short-sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+        # What a sync targets. The stage update has to address the same release.
+        echo "release-version=${SHORT_SHA:-${VERSION}}" >> "$GITHUB_OUTPUT"
 
         # Losing the notes is not worth losing the sync over.
         if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
@@ -180,7 +191,7 @@ runs:
         access_key: ${{ inputs.access-key }}
         command: sync
         name: ${{ inputs.name != '' && inputs.name || inputs.version }}
-        version: ${{ steps.guard.outputs.short-sha != '' && steps.guard.outputs.short-sha || inputs.version }}
+        version: ${{ steps.guard.outputs.release-version }}
         base_ref: ${{ steps.guard.outputs.base-ref }}
         include_paths: ${{ inputs.include-paths }}
         links: ${{ inputs.links }}
@@ -193,12 +204,29 @@ runs:
         cli_version: v0.15.0
         log_level: ${{ runner.debug == '1' && 'verbose' || '' }}
 
+    # A sync cannot set a stage — ReleaseSyncInput has no stage field — so a
+    # scheduled pipeline needs a second call to promote the release.
+    - name: Move the release to its stage
+      id: stage
+      if: inputs.stage != '' && steps.guard.outputs.skip != 'true' && steps.sync.outcome == 'success'
+      continue-on-error: true
+      uses: linear/linear-release-action@17b8c24f8ceb2b98cabaf1965ff83c55dd596fac # v0.15.1
+      with:
+        access_key: ${{ inputs.access-key }}
+        command: update
+        version: ${{ steps.guard.outputs.release-version }}
+        stage: ${{ inputs.stage }}
+        cli_version: v0.15.0
+        log_level: ${{ runner.debug == '1' && 'verbose' || '' }}
+
     - name: Report the outcome
       # Skipped whenever the sync was — the guard has already had its say.
       if: always() && steps.sync.outcome != 'skipped'
       shell: bash
       env:
         OUTCOME: ${{ steps.sync.outcome }}
+        STAGE_OUTCOME: ${{ steps.stage.outcome }}
+        STAGE: ${{ inputs.stage }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         RELEASE_NAME: ${{ steps.sync.outputs.release-name }}
         RELEASE_URL: ${{ steps.sync.outputs.release-url }}
@@ -215,6 +243,17 @@ runs:
           fi
           echo "::warning::${MSG}"
           exit 0
+        fi
+
+        # A release left in the wrong stage is easy to miss, and on a scheduled
+        # pipeline it is the difference between shipped and still in PRE/RC.
+        if [[ -n "${STAGE}" && "${STAGE_OUTCOME}" != "success" ]]; then
+          MSG="linear-release: the release synced but could not be moved to the ${STAGE} stage."
+          if [[ "${FAIL_ON_ERROR}" == "true" ]]; then
+            echo "::error::${MSG}"
+            exit 1
+          fi
+          echo "::warning::${MSG}"
         fi
 
         # dry-run, and a sync that matched no issues, both return without a URL.

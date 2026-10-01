@@ -43,6 +43,7 @@ jobs:
 | `include-paths` | no | | Comma-separated globs restricting which commits count. For monorepos |
 | `links` | no | | Links to attach, one per line: absolute URL or `Label=URL` |
 | `release-notes` | no | | Path to a markdown file to use as the release notes |
+| `stage` | no | | Move the release to this stage after syncing, e.g. `Released`. Scheduled pipelines only |
 | `dry-run` | no | `false` | Scan and read, but make no changes in Linear |
 | `fail-on-error` | no | `false` | Fail the step instead of warning when the sync cannot run |
 
@@ -60,6 +61,8 @@ All four are empty when nothing was created or updated — a skip, a failure, a 
 ## Things that will bite you
 
 **The tag is the title; the commit SHA is the pill.** `version` is also what a sync targets, so two tags on one commit resolve to a single release.
+
+**A sync cannot set a stage.** `ReleaseSyncInput` has no stage field, and a sync lands a release in the pipeline's first *started* stage on a scheduled pipeline, or its first *completed* stage on a continuous one. So on a scheduled pipeline a stable release needs `stage: Released` to be promoted out of PRE/RC; pre-releases pass nothing and stay where they land.
 
 **The access key picks the pipeline, nothing here does.** A key belongs to exactly one pipeline, so a repo given the wrong key files its releases in someone else's. An org-wide `LINEAR_ACCESS_KEY` therefore sends every repo to the same pipeline; repos that need their own want a repo-level secret.
 
