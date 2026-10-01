@@ -56,8 +56,10 @@ runs:
       env:
         GRYPE_VERSION: "0.110.0"
       run: |
-        curl -sSfL "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz" -o "grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
-        curl -sSfL "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt" -o grype_checksums.txt
+        # GitHub's release CDN answers 5xx now and then; without retries the scan step dies,
+        # the summary step then emits an empty report, and consumers would score the image clean.
+        curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz" -o "grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+        curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt" -o grype_checksums.txt
         grep "grype_${GRYPE_VERSION}_linux_amd64.tar.gz" grype_checksums.txt | sha256sum -c -
         tar xzf "grype_${GRYPE_VERSION}_linux_amd64.tar.gz" grype
         sudo mv grype /usr/local/bin/grype
