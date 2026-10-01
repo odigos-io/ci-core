@@ -1,0 +1,12 @@
+# Linear team keys, one per line. Shared by require-linear and linear-release,
+# which compose them into an issue-key regex on read. Blank lines and #comments
+# are ignored. Add a team here and both actions pick it up.
+CORE
+DES
+DEVOPS
+GEN
+PLAT
+PRD
+RUMBA
+RUN
+SEC
