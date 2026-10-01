@@ -87,6 +87,14 @@ jobs:
           version: v0.0.0-test
           release-notes: does-not-exist.md
 
+      - name: A stage on a skipped sync is not fatal
+        id: stage-skipped
+        uses: ./linear-release
+        with:
+          access-key: ""
+          version: v0.0.0-test
+          stage: Released
+
       - name: Assert each case behaved as documented
         env:
           NO_KEY: ${{ steps.no-key.outcome }}
@@ -96,6 +104,7 @@ jobs:
           STRAY_BASE_REF: ${{ steps.stray-base-ref.outcome }}
           STRAY_NOTES: ${{ steps.stray-notes.outcome }}
           BOGUS_BASE_REF: ${{ steps.bogus-base-ref.outcome }}
+          STAGE_SKIPPED: ${{ steps.stage-skipped.outcome }}
           NO_KEY_URL: ${{ steps.no-key.outputs.release-url }}
         run: |
           set -euo pipefail
@@ -118,6 +127,7 @@ jobs:
           expect "non-ancestor base-ref"            success "$STRAY_BASE_REF"
           expect "missing release-notes file"       success "$STRAY_NOTES"
           expect "unresolvable base-ref"            success "$BOGUS_BASE_REF"
+          expect "stage on a skipped sync"          success "$STAGE_SKIPPED"
 
           # The skip path must not invent outputs.
           if [[ -n "$NO_KEY_URL" ]]; then
