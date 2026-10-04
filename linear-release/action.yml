@@ -161,14 +161,29 @@ runs:
         # Only a tag that sorts BEFORE this one means this release ships nothing new.
         # A later tag on the same commit does not change what this release delivered,
         # and testing for "any other tag" would relabel the earlier release on re-sync.
-        PRIOR_TAGS="$( { git tag --points-at HEAD 2>/dev/null | grep -vFx "${VERSION}"; printf '%s\n' "${VERSION}"; } \
-          | sort -V | awk -v v="${VERSION}" '$0 == v { exit } { print }' | paste -sd', ' - )"
-        if [[ -n "${PRIOR_TAGS}" ]]; then
+        # Tags on this commit that sort before this one; the nearest is what this
+        # release adds nothing over, so name it rather than leaving the pill vague.
+        PRIOR_LIST="$( { git tag --points-at HEAD 2>/dev/null | grep -vFx "${VERSION}"; printf '%s\n' "${VERSION}"; } \
+          | sort -V -u \
+          | awk -v v="${VERSION}" '$0 == v { exit } { print }' )"
+        # `grep` exits 1 when nothing matches, which is the ordinary case here, and the
+        # step runs under `set -euo pipefail`.
+        PRIOR_LAST="$(printf '%s\n' "${PRIOR_LIST}" | grep -v '^$' | tail -1 || true)"
+        # Any other tag here, ordered or not. `sort -V` puts a prerelease before the
+        # stable on GNU coreutils but after it on BSD, so PRIOR_LAST can come back empty
+        # on a commit that is in fact shared. Falling through to the SHA there would
+        # rename the existing release, so this is the backstop: unordered but shared
+        # still gets the tag, which is unique, just without the explanatory label.
+        SHARED_ANY="$(git tag --points-at HEAD 2>/dev/null | grep -vFx "${VERSION}" | head -1 || true)"
+        if [[ -n "${PRIOR_LAST}" ]]; then
           # Say why the pill is not a SHA. The tag has to stay in the string: version
           # is the identity, so a bare label would collide with the next release that
           # ships no commits, anywhere in the org.
-          echo "release-version=${VERSION} (no new commits)" >> "$GITHUB_OUTPUT"
-          echo "::notice::linear-release: ${PRIOR_TAGS} already tag this commit; keying this release on '${VERSION} (no new commits)' so the existing release is not renamed."
+          echo "release-version=${VERSION} (no new commits since ${PRIOR_LAST})" >> "$GITHUB_OUTPUT"
+          echo "::notice::linear-release: ${PRIOR_LAST} already tags this commit; keying this release on '${VERSION} (no new commits since ${PRIOR_LAST})' so the existing release is not renamed."
+        elif [[ -n "${SHARED_ANY}" ]]; then
+          echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "::warning::linear-release: ${SHARED_ANY} shares this commit but could not be ordered against ${VERSION}; keying on the tag so the existing release is not renamed."
         elif [[ -n "${SHORT_SHA}" ]]; then
           echo "release-version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
         else
