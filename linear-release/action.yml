@@ -151,11 +151,12 @@ runs:
         fi
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
-        # Linear renders name as the title and version as the pill beside it.
-        SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
-        echo "short-sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-        # What a sync targets. The stage update has to address the same release.
-        echo "release-version=${SHORT_SHA:-${VERSION}}" >> "$GITHUB_OUTPUT"
+        # The version is the release's identity: a sync matches an existing release by
+        # it, and the stage update has to address the same one. It must therefore be
+        # unique per release, which a commit SHA is not — two tags on one commit (a
+        # patch that ships no changes) collide, and the second sync renames the first
+        # instead of creating a release. Use the tag.
+        echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
 
         # Losing the notes is not worth losing the sync over.
         if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
