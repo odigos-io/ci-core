@@ -85,6 +85,25 @@ runs:
           # tool cannot resolve via the GitHub commits API.
           tag_commit_sha() { git rev-parse "${1}^{commit}"; }
 
+          # Release-branch naming is not uniform across the org: odigos-enterprise
+          # cuts releases/vX.Y.0 while ebpf-core and enterprise-go-instrumentation
+          # cut releases/vX.Y.x. Resolve whichever exists instead of assuming one.
+          prev_release_branch() {
+            local c
+            for c in "origin/releases/v${1}.${2}.0" "origin/releases/v${1}.${2}.x"; do
+              if git rev-parse --verify -q "${c}" >/dev/null 2>&1; then echo "${c}"; return 0; fi
+            done
+            return 1
+          }
+
+          # Highest stable tag sorting below TAG, used when no previous release
+          # branch exists (the first minor of a repo, or a renamed series).
+          prev_stable_tag() {
+            { git tag --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; printf '%s\n' "${1}"; } \
+              | sort -V -u \
+              | awk -v t="${1}" '$0 == t { print prev; exit } { prev = $0 }'
+          }
+
           # --- Pre-release: vX.Y.Z-preN or vX.Y.Z-rcN ---
           #
           # Always measured from where this minor branched off, never from the
@@ -97,20 +116,40 @@ runs:
             MINOR="${BASH_REMATCH[2]}"
             KIND="${BASH_REMATCH[4]}"
             PREV_MINOR=$((MINOR - 1))
-            PREV_RELEASE_BRANCH="origin/releases/v${MAJOR}.${PREV_MINOR}.0"
-            START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+            if PREV_RELEASE_BRANCH=$(prev_release_branch "$MAJOR" "$PREV_MINOR"); then
+              START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+              echo "Scenario: ${KIND} for minor v${MAJOR}.${MINOR}, from the branch point off ${PREV_RELEASE_BRANCH}"
+            else
+              FALLBACK=$(prev_stable_tag "$TAG")
+              if [ -n "$FALLBACK" ]; then
+                START_SHA=$(tag_commit_sha "$FALLBACK")
+                echo "::notice::no releases/v${MAJOR}.${PREV_MINOR}.{0,x} branch; measuring from ${FALLBACK}"
+              else
+                START_SHA=$(git merge-base origin/main HEAD)
+                echo "::warning::no previous release branch or stable tag for ${TAG}; measuring from the main merge-base"
+              fi
+            fi
             echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
-            echo "Scenario: ${KIND} for minor v${MAJOR}.${MINOR}, from the branch point off ${PREV_RELEASE_BRANCH}"
 
           # --- Stable vX.Y.0 (first stable for minor) ---
           elif [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.0$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"
             PREV_MINOR=$((MINOR - 1))
-            PREV_RELEASE_BRANCH="origin/releases/v${MAJOR}.${PREV_MINOR}.0"
-            START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+            if PREV_RELEASE_BRANCH=$(prev_release_branch "$MAJOR" "$PREV_MINOR"); then
+              START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
+              echo "Scenario: first stable for minor, PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
+            else
+              FALLBACK=$(prev_stable_tag "$TAG")
+              if [ -n "$FALLBACK" ]; then
+                START_SHA=$(tag_commit_sha "$FALLBACK")
+                echo "::notice::no releases/v${MAJOR}.${PREV_MINOR}.{0,x} branch; measuring from ${FALLBACK}"
+              else
+                START_SHA=$(git merge-base origin/main HEAD)
+                echo "::warning::no previous release branch or stable tag for ${TAG}; measuring from the main merge-base"
+              fi
+            fi
             echo "start_sha=${START_SHA}" >> $GITHUB_OUTPUT
-            echo "Scenario: first stable for minor, PREV_RELEASE_BRANCH=$PREV_RELEASE_BRANCH"
 
           # --- Stable vX.Y.Z patch (Z >= 1) ---
           elif [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
