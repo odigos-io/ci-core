@@ -151,12 +151,29 @@ runs:
         fi
         echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
 
-        # The version is the release's identity: a sync matches an existing release by
-        # it, and the stage update has to address the same one. It must therefore be
-        # unique per release, which a commit SHA is not — two tags on one commit (a
-        # patch that ships no changes) collide, and the second sync renames the first
-        # instead of creating a release. Use the tag.
-        echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
+        # Linear renders name as the title and version as the pill beside it, so the
+        # pill reads better as a short SHA. But version is also the release's identity
+        # — a sync matches an existing release by it — and a SHA is unique only while
+        # one tag points at the commit. When an earlier tag already does (a patch that
+        # ships no commits, or a re-tag), reusing the SHA makes the sync match that
+        # release and rename it instead of creating one. Fall back to the tag there.
+        SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+        # Only a tag that sorts BEFORE this one means this release ships nothing new.
+        # A later tag on the same commit does not change what this release delivered,
+        # and testing for "any other tag" would relabel the earlier release on re-sync.
+        PRIOR_TAGS="$( { git tag --points-at HEAD 2>/dev/null | grep -vFx "${VERSION}"; printf '%s\n' "${VERSION}"; } \
+          | sort -V | awk -v v="${VERSION}" '$0 == v { exit } { print }' | paste -sd', ' - )"
+        if [[ -n "${PRIOR_TAGS}" ]]; then
+          # Say why the pill is not a SHA. The tag has to stay in the string: version
+          # is the identity, so a bare label would collide with the next release that
+          # ships no commits, anywhere in the org.
+          echo "release-version=${VERSION} (no new commits)" >> "$GITHUB_OUTPUT"
+          echo "::notice::linear-release: ${PRIOR_TAGS} already tag this commit; keying this release on '${VERSION} (no new commits)' so the existing release is not renamed."
+        elif [[ -n "${SHORT_SHA}" ]]; then
+          echo "release-version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+        else
+          echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
+        fi
 
         # Losing the notes is not worth losing the sync over.
         if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
