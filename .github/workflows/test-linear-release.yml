@@ -1,7 +1,7 @@
 name: linear-release Test
 
 # Exercises the fail-soft contract, which is the whole reason this wrapper
-# exists. None of these cases need a real LINEAR_ACCESS_KEY.
+# exists. None of these cases need a real LINEAR_RELEASE_ACCESS_KEY.
 #
 # The bogus-key case is the one that matters: it lets the upstream action run
 # for real and fail against Linear, proving that `continue-on-error` on a
