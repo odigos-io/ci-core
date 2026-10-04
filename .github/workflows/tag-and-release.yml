@@ -126,24 +126,13 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # Linear only auto-generates notes from the issues attached to a release,
-      # so hand it the notes GitHub already generated for this tag.
-      - name: Fetch the GitHub release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.calculate.outputs.new_version }}
-        run: |
-          set -uo pipefail
-          if ! gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" \
-               --json body --jq .body > release-notes.md; then
-            echo "::warning::could not read the GitHub release notes for ${VERSION}"
-          fi
-          # Empty or missing is handled by the action: it warns and syncs without notes.
-          [ -s release-notes.md ] || rm -f release-notes.md
-
+      # Deliberately no release-notes input. Linear generates the note from the
+      # issues attached to the release, following this pipeline's releaseNote
+      # template (TL;DR, then the changelog) — but only while the note is empty,
+      # so forwarding the GitHub body would suppress generation entirely. The
+      # commit-level list stays on the GitHub release, which is where it belongs.
       - uses: odigos-io/ci-core/linear-release@main
         with:
-          release-notes: release-notes.md
           access-key: ${{ secrets.LINEAR_ACCESS_KEY }}
           name: ${{ needs.calculate.outputs.new_version }}
           version: ${{ needs.calculate.outputs.new_version }}
