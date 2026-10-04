@@ -286,9 +286,15 @@ runs:
           PRERELEASE_FLAG="--prerelease"
         fi
 
+        # A previous_tag_name GitHub does not recognise is a hard 400, which would
+        # fail the release outright. An unknown one is no worse than none, so drop it.
         GENERATE_NOTES_ARGS=(-f tag_name="${NEW_VERSION}")
         if [[ -n "${PREVIOUS_VERSION}" ]]; then
-          GENERATE_NOTES_ARGS+=(-f previous_tag_name="${PREVIOUS_VERSION}")
+          if git rev-parse -q --verify "refs/tags/${PREVIOUS_VERSION}" >/dev/null; then
+            GENERATE_NOTES_ARGS+=(-f previous_tag_name="${PREVIOUS_VERSION}")
+          else
+            echo "::warning::previous_version ${PREVIOUS_VERSION} is not a tag here; generating unscoped notes."
+          fi
         fi
 
         NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
