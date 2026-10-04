@@ -144,7 +144,7 @@ jobs:
       - uses: odigos-io/ci-core/linear-release@main
         with:
           release-notes: release-notes.md
-          access-key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          access-key: ${{ secrets.LINEAR_RELEASE_ACCESS_KEY }}
           name: ${{ needs.calculate.outputs.new_version }}
           version: ${{ needs.calculate.outputs.new_version }}
           # The action drops this when it is not an ancestor of HEAD, which is
