@@ -98,6 +98,16 @@ runs:
 
           # Highest stable tag sorting below TAG, used when no previous release
           # branch exists (the first minor of a repo, or a renamed series).
+          # The pre/rc immediately before TAG in the same vX.Y.0 series, so each
+          # progression reports only its own delta. Handles both -preN and -pre.N,
+          # gaps in the numbering, and the pre -> rc handoff.
+          prev_prerelease_tag() {
+            { git tag --list "v${2}.${3}.0-*" \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-(pre|rc)\.?[0-9]+$'; printf '%s\n' "${1}"; } \
+              | sort -V -u \
+              | awk -v t="${1}" '$0 == t { print prev; exit } { prev = $0 }'
+          }
+
           prev_stable_tag() {
             { git tag --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; printf '%s\n' "${1}"; } \
               | sort -V -u \
@@ -106,19 +116,23 @@ runs:
 
           # --- Pre-release: vX.Y.Z-preN or vX.Y.Z-rcN ---
           #
-          # Always measured from where this minor branched off, never from the
-          # previous pre/rc. That makes the line cumulative: every pre and rc
-          # carries everything shipped since the last minor, so rc0 contains all
-          # the preN work and the first stable contains all the rcN work. An
-          # issue legitimately belongs to several releases.
+          # Measured from the previous pre/rc, so each progression reports only what
+          # it added. The first pre/rc of a minor has no predecessor and falls back
+          # to the branch point. The cumulative view lives on the first stable
+          # (vX.Y.0 below), which measures from the branch point and so carries
+          # every preN and rcN that came before it.
           if [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-(pre|rc)\.?([0-9]+)$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"
             KIND="${BASH_REMATCH[4]}"
             PREV_MINOR=$((MINOR - 1))
-            if PREV_RELEASE_BRANCH=$(prev_release_branch "$MAJOR" "$PREV_MINOR"); then
+            PREV_PRERELEASE="$(prev_prerelease_tag "$TAG" "$MAJOR" "$MINOR")"
+            if [ -n "$PREV_PRERELEASE" ]; then
+              START_SHA=$(tag_commit_sha "$PREV_PRERELEASE")
+              echo "Scenario: ${KIND} for v${MAJOR}.${MINOR}, delta since ${PREV_PRERELEASE}"
+            elif PREV_RELEASE_BRANCH=$(prev_release_branch "$MAJOR" "$PREV_MINOR"); then
               START_SHA=$(git merge-base origin/main "$PREV_RELEASE_BRANCH")
-              echo "Scenario: ${KIND} for minor v${MAJOR}.${MINOR}, from the branch point off ${PREV_RELEASE_BRANCH}"
+              echo "Scenario: first ${KIND} for minor v${MAJOR}.${MINOR}, from the branch point off ${PREV_RELEASE_BRANCH}"
             else
               FALLBACK=$(prev_stable_tag "$TAG")
               if [ -n "$FALLBACK" ]; then
