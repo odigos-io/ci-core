@@ -179,8 +179,15 @@ runs:
           # Say why the pill is not a SHA. The tag has to stay in the string: version
           # is the identity, so a bare label would collide with the next release that
           # ships no commits, anywhere in the org.
-          echo "release-version=${VERSION} (no new commits since ${PRIOR_LAST})" >> "$GITHUB_OUTPUT"
-          echo "::notice::linear-release: ${PRIOR_LAST} already tags this commit; keying this release on '${VERSION} (no new commits since ${PRIOR_LAST})' so the existing release is not renamed."
+          # A first stable sitting on the last pre/rc of its own minor was promoted from
+          # it, which is more informative than saying it shipped nothing new.
+          if [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.0$ && "${PRIOR_LAST}" == "${VERSION}-"* ]]; then
+            LABEL="promoted from ${PRIOR_LAST}"
+          else
+            LABEL="no new commits since ${PRIOR_LAST}"
+          fi
+          echo "release-version=${VERSION} (${LABEL})" >> "$GITHUB_OUTPUT"
+          echo "::notice::linear-release: ${PRIOR_LAST} already tags this commit; keying this release on '${VERSION} (${LABEL})' so the existing release is not renamed."
         elif [[ -n "${SHARED_ANY}" ]]; then
           echo "release-version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "::warning::linear-release: ${SHARED_ANY} shares this commit but could not be ordered against ${VERSION}; keying on the tag so the existing release is not renamed."
