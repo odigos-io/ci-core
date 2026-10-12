@@ -55,6 +55,16 @@ inputs:
   run_url:
     description: "URL of the triggering Actions run — recorded in the tag message"
     required: false
+  draft_release:
+    description: |
+      'true' creates the GitHub release as a draft. For repos that publish build
+      artifacts (goreleaser and similar), a published release is visible to anything
+      watching the release-published webhook — the Terraform Registry, for one —
+      before the assets are uploaded. Drafting it lets the artifact job publish once
+      the upload is complete, so nothing ever observes an assetless release.
+      A draft fires no webhook and is invisible to anonymous readers until published.
+    required: false
+    default: "false"
   sts_identity:
     description: "STS identity to request"
     required: false
@@ -280,6 +290,7 @@ runs:
         GH_TOKEN: ${{ steps.sts.outputs.GH_TOKEN }}
         NEW_VERSION: ${{ inputs.new_version }}
         PREVIOUS_VERSION: ${{ inputs.previous_version }}
+        DRAFT_RELEASE: ${{ inputs.draft_release }}
       run: |
         PRERELEASE_FLAG=""
         if [[ "${NEW_VERSION}" == *"-pre."* || "${NEW_VERSION}" == *"-rc."* ]]; then
@@ -306,10 +317,16 @@ runs:
           NOTES="${NOTES:0:$MAX}"$'\n\n_Release notes truncated — see full git history for details._'
         fi
 
+        DRAFT_FLAG=""
+        if [[ "${DRAFT_RELEASE}" == "true" ]]; then
+          DRAFT_FLAG="--draft"
+          echo "::notice::release ${NEW_VERSION} created as a draft; the artifact job must publish it."
+        fi
+
         gh release create "${NEW_VERSION}" \
           --title "${NEW_VERSION}" \
           --notes "$NOTES" \
-          $PRERELEASE_FLAG
+          $PRERELEASE_FLAG $DRAFT_FLAG
 
     - name: Write release complete summary
       if: ${{ inputs.operation == 'tag' }}
