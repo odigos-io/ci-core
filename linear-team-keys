@@ -2,6 +2,7 @@
 # which compose them into an issue-key regex on read. Blank lines and #comments
 # are ignored. Add a team here and both actions pick it up.
 CORE
+CVEAUTO
 DES
 DEVOPS
 GEN
