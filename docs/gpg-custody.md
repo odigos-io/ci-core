@@ -1,326 +1,146 @@
 # GPG custody — Linux package signing
 
-This runbook covers the GPG key that signs Odigos `.deb` and `.rpm` packages: the key
-ceremony, where each piece of key material lives, how the public key is published, and
-what to do on rotation or compromise. Image signing is keyless cosign and entirely
-separate — see [SIGNING.md](../SIGNING.md).
+This page covers the GPG key that signs Odigos `.deb` and `.rpm` packages: what the key
+is, where each half lives, how the public key reaches customers, and how a new key is
+issued. Image signing is keyless cosign and entirely separate — see
+[SIGNING.md](../SIGNING.md).
 
-The design is key-agnostic: CI consumes whatever key sits in the
-`ODIGOS_PKG_SIGNING_KEY` repo secret, so swapping the key never requires a workflow
-change. (`ODIGOS_PKG_SIGNING_KEY_PASSPHRASE` also exists but stays empty — see
-[What CI expects](#what-ci-expects).)
+The design is deliberately minimal: **one key, one secret, one gated workflow**. There is
+no offline root, no subkey, no passphrase, no vault copy and no ceremony. The GitHub
+secret store is the security boundary, and the published keyring is what customers
+trust.
 
 ## The two-key model
 
-Two unrelated keys are involved in package distribution, and they must never be
-confused:
+Two unrelated keys are involved in package distribution:
 
-- **Google's Artifact Registry key** signs the **repo metadata** (apt `InRelease`, yum
-  `repomd.xml`). This is the key served at `apt.odigos.io/doc/repo-signing-key.gpg` —
-  it belongs to Google, we don't hold it, and it proves the *repo index* is what
-  Artifact Registry published.
-- **The Odigos package signing key** (this runbook) signs the **packages themselves**:
-  an embedded `debsign` signature in each `.deb` and a header signature in each `.rpm`.
-  It proves each *package* was built by our release pipeline, even when the file is
-  obtained outside the repo (direct download, mirror, air-gap copy).
+- **Google's Artifact Registry key** signs the **repo metadata**: apt `InRelease` and yum
+  `repomd.xml`. It is the key served at `apt.odigos.io/doc/repo-signing-key.gpg` and
+  `yum.odigos.io/doc/repo-signing-key.gpg`; Google holds it, we do not. The yum repo
+  config keeps `repo_gpgcheck=0` so that `gpgkey=` only has to list our key; turning it
+  on would mean adding Google's key URL to `gpgkey=` as well.
+- **The Odigos package signing key** (this page) signs the **packages themselves**: a
+  header signature in each `.rpm` and a `debsigs`-style `_gpgorigin` member in each
+  `.deb`. It proves a package came out of our release pipeline even when the file is
+  obtained outside the repo (direct download, mirror, air-gapped copy).
 
-`apt` only checks the repo metadata, so on Debian/Ubuntu the Google key is what makes
-`apt install` work; our embedded deb signature is defense-in-depth, verifiable with
-`debsig-verify`. On rpm systems, `gpgcheck=1` verifies our key per-package. Publishing
-one key never replaces the other.
+On rpm systems `gpgcheck=1` verifies our key per package. On Debian/Ubuntu `apt` only
+checks the repo metadata, so Google's key is what makes `apt install` work and the
+embedded deb signature is defence in depth, verifiable with `debsig-verify` or `gpg`.
 
-## Key ceremony (~15 minutes)
+## The key
 
-Run on the operator's machine, **never in CI**. Produces:
+| | |
+|---|---|
+| Type | RSA-4096, sign-capable primary key, no subkeys, no expiry, **no passphrase** |
+| User ID | `Odigos Package Signing <security@odigos.io>` |
+| Current fingerprint | `6E80516AF71835E5FD12E3D8272251E89CC74CFF` (issued 2026-10-18) |
+| Issued by | the `rotate-package-signing-key` workflow in the private repository `odigos-io/release-signing` |
 
-- an **offline root**: rsa4096, certify-only, no expiry — the identity customers trust.
-  It leaves the machine only as an armored export into the vault, and exists to mint
-  and revoke subkeys.
-- a **signing subkey**: rsa4096, sign-only, 2-year expiry — the only secret CI ever
-  holds, exported **without passphrase protection** (step 6). Losing it costs a
-  rotation, not the customer-facing identity.
+Why no passphrase: nfpm can read one from `NFPM_PASSPHRASE`, but a passphrase stored
+next to the key in the same secret store protects nothing while adding a second secret to
+scope and rotate. Why no offline root or subkeys: nobody holds the key, so there is nothing
+to protect offline; if the key is lost or compromised a new one is issued and the
+keyring grows by one entry.
 
-One caveat on the subkey design: `rpm` older than 4.13 (RHEL 7 era) cannot verify
-signatures made by a subkey. Anything modern is fine.
-
-### 1. Temp GNUPGHOME
-
-```bash
-export GNUPGHOME="$(mktemp -d -t gpg)"
-chmod 700 "$GNUPGHOME"
-```
-
-**macOS pitfall:** gpg-agent creates unix sockets inside `GNUPGHOME`, and socket paths
-are capped at ~104 bytes on macOS. A deep path (e.g. under a repo checkout) fails with
-opaque "can't connect to the agent" errors — `mktemp -d -t gpg` stays short enough.
-(`-t gpg` is BSD/macOS syntax; on Linux use `mktemp -d /tmp/gpg.XXXXXX`.)
-
-### 2. Passphrase and root key
-
-One passphrase protects the whole key during the ceremony and guards the offline
-root copy — generated here, stored only in the vault. It is **not** a CI secret: the
-subkey sheds it in step 6 before its export becomes the repo secret.
-
-```bash
-PASS="$(openssl rand -base64 32)"
-
-gpg --batch --pinentry-mode loopback --generate-key <<EOF
-Key-Type: RSA
-Key-Length: 4096
-Key-Usage: cert
-Name-Real: Odigos Package Signing
-Name-Email: security@odigos.io
-Expire-Date: 0
-Passphrase: ${PASS}
-%commit
-EOF
-
-FPR="$(gpg --list-keys --with-colons security@odigos.io | awk -F: '/^fpr:/ {print $10; exit}')"
-```
-
-### 3. Signing subkey
-
-```bash
-gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --quick-add-key "$FPR" rsa4096 sign 2y
-```
-
-Sanity-check the shape — root must show `[C]` with no expiry, subkey `[S]` with one:
-
-```bash
-gpg --list-keys --with-subkey-fingerprints security@odigos.io
-```
-
-### 4. Revocation certificate
-
-gpg already generated one at key creation:
-
-```bash
-cat "$GNUPGHOME/openpgp-revocs.d/$FPR.rev"
-```
-
-**Print this file on paper** during the ceremony. Note the safety guard: the armored
-block starts with `:-----BEGIN PGP PUBLIC KEY BLOCK-----` — the leading colon must be
-deleted before the certificate can be imported. Anyone holding it can kill the key
-(denial of service, not forgery), so it stores alongside the root, never in CI.
-
-### 5. Export the three artifacts
-
-```bash
-cd "$GNUPGHOME"
-
-# (a) secret SUBKEY ONLY, still passphrase-protected — step 6 turns this into the CI artifact
-gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --armor --export-secret-subkeys "$FPR" > subkey-protected.asc
-
-# (b) public key — published to customers
-gpg --armor --export "$FPR" > odigos-package-signing.asc
-
-# (c) full secret root — offline vault only, never CI
-gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --armor --export-secret-keys "$FPR" > root-offline.asc
-```
-
-### 6. Strip the subkey passphrase for CI
-
-The GitHub secret store is the security boundary: an encrypted key whose passphrase
-sits in the same store adds no protection, and it breaks the tooling outright — nfpm
-(v2.47) refuses protected key material with `openpgp: invalid argument: signing key
-is encrypted` even when its passphrase env vars are set. So the CI artifact is the
-subkey with its protection **removed**; only the offline root stays
-passphrase-protected.
-
-gpg has no "export unprotected" switch, so clear the passphrase in a second scratch
-home that holds only the subkey:
-
-```bash
-STRIP="$(mktemp -d -t gpgs)"; chmod 700 "$STRIP"
-GNUPGHOME="$STRIP" gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --import subkey-protected.asc
-printf '%s\n\n' "$PASS" | GNUPGHOME="$STRIP" gpg --batch --pinentry-mode loopback \
-  --command-fd 0 --status-fd 1 --passwd "$FPR"
-GNUPGHOME="$STRIP" gpg --batch --armor --export-secret-subkeys "$FPR" > subkey-ci.asc
-rm -rf "$STRIP"
-```
-
-The `printf` feeds the old passphrase, then an empty new one, through the command fd.
-Expect the `--passwd` step to **exit non-zero** with `error changing passphrase: No
-secret key` — that is gpg failing on the root *stub*, which has no secret material to
-re-protect. The `[GNUPG:] SUCCESS keyedit.passwd` line confirms the subkey itself was
-cleared, and step 7 proves it.
-
-### 7. Prove the CI export lacks the root and carries no passphrase
-
-Import `subkey-ci.asc` into a scratch keyring and confirm the primary shows `sec#` —
-the `#` means the root's secret material is *absent* from the blob CI will hold —
-then confirm a signature needs no passphrase:
-
-```bash
-VERIFY="$(mktemp -d -t gpgv)"; chmod 700 "$VERIFY"
-GNUPGHOME="$VERIFY" gpg --import subkey-ci.asc
-GNUPGHOME="$VERIFY" gpg -K       # expect: sec#  ...  ssb
-echo probe | GNUPGHOME="$VERIFY" gpg --batch --pinentry-mode error \
-  -u "$FPR" -o /dev/null --sign -   # must succeed with no passphrase, no pinentry
-gpg --list-packets subkey-ci.asc | grep S2K   # must print nothing
-rm -rf "$VERIFY"
-```
-
-If `gpg -K` prints `sec` without the `#`, or the sign probe wants a passphrase, stop —
-the wrong file is about to become a CI secret.
-
-### 8. Set the CI secret
-
-This **overwrites** the throwaway TEST key currently in place (see
-[Storage](#storage)):
-
-```bash
-for repo in odigos-io/vm-agent odigos-io/odigos; do
-  gh secret set ODIGOS_PKG_SIGNING_KEY --repo "$repo" < subkey-ci.asc
-done
-```
-
-`ODIGOS_PKG_SIGNING_KEY_PASSPHRASE` stays **reserved but empty** — the key is
-unencrypted, nothing reads it, and the workflows tolerate an empty value. Do not set
-it to the vault passphrase: that would put the root passphrase inside the CI boundary
-for nothing.
-
-### 9. Store offline, then destroy the workspace
-
-Put `root-offline.asc`, the passphrase, and the revocation certificate in the vault
-(next section), upload `odigos-package-signing.asc` (see
-[Publishing the public key](#publishing-the-public-key)), then:
-
-```bash
-cd / && rm -rf "$GNUPGHOME"; unset PASS GNUPGHOME
-```
-
-Nothing from the ceremony may survive on disk.
-
-## Storage
+## Where each half lives
 
 | Material | Lives | Never |
 |---|---|---|
-| Root secret key (`root-offline.asc`) | password-manager security vault | CI, any repo, any laptop keyring |
-| Passphrase | vault only (`ODIGOS_PKG_SIGNING_KEY_PASSPHRASE` stays reserved and empty) | CI, committed anywhere |
-| Revocation certificate | vault **and** a printed copy, stored separately | CI |
-| Signing subkey (`subkey-ci.asc`, unencrypted) | `ODIGOS_PKG_SIGNING_KEY` repo secret on `odigos-io/vm-agent` and `odigos-io/odigos` | the vault is optional, nowhere else |
-| Public key | S3 (below) + importable from any package | — |
+| Private key | organization secret `ODIGOS_PKG_SIGNING_KEY`, visibility *selected*: `odigos-io/vm-agent`, `odigos-io/odigos-enterprise` | a repo secret, a vault, a laptop, a human's hands |
+| Public key | `docs/keys/odigos-package-signing-keys.asc` in `odigos-io/odigos`, served at `https://raw.githubusercontent.com/odigos-io/odigos/main/docs/keys/odigos-package-signing-keys.asc` | `apt.odigos.io/doc/repo-signing-key.gpg` (that is Google's key) |
+| Key status table | "Linux package signing keys" section of `docs/snippets/shared/setup/verifying-images.mdx` in `odigos-io/odigos` | — |
+| Revocation certificate | none exists (see [Compromise](#compromise)) | — |
 
-**Today these two secrets hold a throwaway TEST key** — uid
-`Odigos Package Signing TEST (throwaway, do not trust)`, fingerprint
-`510DC64414507ACC3CA14BB640C96A2A4C005C5A` — set up purely to validate the CI
-plumbing. The ceremony above **replaces it under the same secret names**; no workflow
-changes, and nothing signed by the TEST key is trustworthy.
+The keyring file is **append-only**: it holds every key that ever signed a published
+package, so old packages keep verifying after a rotation. The status table says which
+key is current and which are retired.
+
+A repository-level secret named `ODIGOS_PKG_SIGNING_KEY` **shadows** the organization
+secret. None may exist on the consumer repos, otherwise CI silently keeps signing with
+whatever that repo secret holds.
+
+## Issuing a key
+
+The only way a key is created is the `rotate-package-signing-key` workflow in
+`odigos-io/release-signing` (`workflow_dispatch`, inputs `reason` and `dry_run`). It runs
+in the `release-gate` environment: a required reviewer must approve the run, and it only
+runs from a protected branch. Every key that ever existed therefore maps to one visible,
+approved run. The job:
+
+1. generates the key with `gpg --quick-generate-key ... rsa4096 sign never` in a
+   temporary `GNUPGHOME` and asserts the export carries no passphrase (no S2K packet);
+2. writes the armored private key to the organization secret, sealed with the
+   organization's secrets public key, using a GitHub App token whose only permission is
+   `organization_secrets: write`, and reads the secret metadata back to confirm the
+   repository scope;
+3. appends the public key to the keyring, updates the status table (the previous
+   `current` key becomes `retired`), commits as `odigos-automations` and opens the docs
+   PR in `odigos-io/odigos` as `octo-sts[bot]`, authenticated through the `sts` action in
+   this repository (trust policy `.github/chainguard/release-signing-docs.sts.yaml` in
+   `odigos-io/odigos`);
+4. removes the temporary key material.
+
+The private key exists only in the runner's temporary directory for the duration of the
+job and in the organization secret afterwards. Nobody sees it.
+
+After a run: merge the docs PR, confirm the keyring URL above returns the new key, and
+check that no repo-level `ODIGOS_PKG_SIGNING_KEY` shadows the new value.
 
 ## What CI expects
 
-The release workflows write `ODIGOS_PKG_SIGNING_KEY` to a temp file and point
-goreleaser v2's nfpm signature config at it — `nfpms[].rpm.signature.key_file` and
-`nfpms[].deb.signature.key_file` both accept an ASCII-armored secret key, **as long
-as it is unencrypted**. nfpm (v2.47) fails on protected key material with
-`openpgp: invalid argument: signing key is encrypted` even when its passphrase
-environment (`NFPM_<ID>_<FORMAT>_PASSPHRASE`, `NFPM_<ID>_PASSPHRASE`,
-`NFPM_PASSPHRASE`) is set — which is why ceremony step 6 strips the subkey's
-protection. `ODIGOS_PKG_SIGNING_KEY_PASSPHRASE` remains defined as a reserved
-secret; the workflows tolerate it empty and nothing consumes it today.
+Both consumers hand nfpm an unencrypted ASCII-armored secret key file through goreleaser
+v2's `nfpms[].rpm.signature.key_file` and `nfpms[].deb.signature.key_file`:
 
-nfpm signs with the **first subkey carrying the signing flag** (goreleaser doesn't
-expose `key_id`), which is exactly the subkey this ceremony produces — so the export
-from step 6 drops in with zero config knobs. Signing is **fail-closed**: a missing
-or empty key fails the release job loudly, same as sign-oci gates image publishes.
+- **vm-agent** passes the secret into the Docker release stage as a BuildKit secret
+  mount (`pkg_signing_key`); the Dockerfile exports its path as `PKG_SIGNING_KEY_FILE`.
+  Staging builds in CI sign too, and a verify step checks every rpm (`rpmkeys --import`
+  + `rpm -K`) and deb (`_gpgorigin` detached signature) before the staging upload; tag
+  releases rely on the fail-closed secret check.
+- **odigos-enterprise** (collector packages) writes the secret to a `umask 077` temp
+  file, exports its path as `ODIGOS_PKG_SIGNING_KEY_FILE`, and shreds the file after
+  goreleaser runs.
 
-## Publishing the public key
+Signing is **fail-closed** in both: a missing or empty secret fails the release job
+before goreleaser runs, the same way `sign-oci` gates image publishes. There are no
+passphrase variables anywhere.
 
-Customers fetch our key from the release bucket:
+## Customer side
 
-```bash
-aws s3 cp odigos-package-signing.asc \
-  s3://odigos-releases/keys/odigos-package-signing.asc \
-  --content-type text/plain --cache-control max-age=300
+```ini
+[odigos]
+baseurl=https://yum.odigos.io/projects/odigos-cloud/odigos-rpm
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://raw.githubusercontent.com/odigos-io/odigos/main/docs/keys/odigos-package-signing-keys.asc
 ```
 
-Do **not** touch `apt.odigos.io/doc/repo-signing-key.gpg` — that path serves Google's
-Artifact Registry repo-metadata key (see [The two-key model](#the-two-key-model)).
-Re-upload to the same S3 key after any rotation: the file carries the subkey and
-revocation state, while the root — the identity customers actually trust — never
-changes.
+`rpm --import <keyring URL>` imports every key in the file, so a customer who imported
+it once keeps verifying old and new packages across a rotation. apt users change
+nothing: metadata verification stays on Google's key.
 
 ## Rotation
 
-### Routine (expiry bump or re-issue) — no customer key change
-
-Run at least a month before subkey expiry. Restore the root into a fresh temp
-`GNUPGHOME` (same `mktemp -d -t gpg` setup as the ceremony), and re-derive `$PASS`
-and `$FPR` — a fresh session has neither:
-
-```bash
-read -rs PASS                      # paste the passphrase from the vault entry
-gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --import root-offline.asc        # from the vault
-FPR="$(gpg --list-keys --with-colons security@odigos.io | awk -F: '/^fpr:/ {print $10; exit}')"
-```
-
-A bare `gpg --import` works too, but gpg verifies the passphrase of a protected
-secret key as it imports — expect a pinentry popup; the loopback flags keep it
-non-interactive.
-
-Then either extend the existing subkey:
-
-```bash
-SUBFPR="$(gpg --list-keys --with-colons "$FPR" | awk -F: '$1=="fpr"' | sed -n 2p | cut -d: -f10)"
-gpg --batch --pinentry-mode loopback --passphrase "$PASS" \
-  --quick-set-expire "$FPR" 2y "$SUBFPR"
-```
-
-or mint a fresh subkey (`--quick-add-key`, ceremony step 3). Either way, re-run the
-ceremony from step 5: re-export, strip the passphrase, re-verify, overwrite the key
-secret, re-upload the public key, destroy the workspace. Customers do nothing — the root
-fingerprint they trust is unchanged; the refreshed public key just carries the new
-expiry/subkey.
+The key has no expiry and is rotated **only on compromise or loss**. Rotation is the
+workflow above with a `reason`: it overwrites the organization secret, appends the new
+public key and retires the previous one in the status table. Then cut a vm-agent and a
+collector release so the current packages carry signatures from the new key. Customers
+only need to re-import the keyring.
 
 ### Compromise
 
-If the **subkey** (i.e. the CI secret) may have leaked:
+There is no offline root and therefore no revocation certificate; the status table is
+the revocation signal.
 
-1. Restore the root offline as above (including the `$PASS`/`$FPR` re-derivation);
-   revoke the subkey: `gpg --edit-key "$FPR"`, then `key 1`, `revkey`, `save`.
-2. Mint a new subkey and overwrite `ODIGOS_PKG_SIGNING_KEY` on **both** repos
-   (ceremony steps 3, 5–8). If the passphrase may have leaked too, rotate it —
-   generate a fresh one and change it before exporting. `gpg --passwd "$FPR"` alone
-   is interactive (pinentry asks for the old and new passphrase); the non-interactive
-   equivalent:
+1. Issue a new key (workflow, `reason` states the compromise) and merge the docs PR,
+   editing the table so the old key's status is `compromised` with the date.
+2. Audit Artifact Registry and the `odigos-releases` S3 bucket for packages published
+   inside the compromise window; rebuild and re-publish them so they carry the new
+   signature.
+3. Tell customers to drop the compromised key from their rpm database
+   (`rpm -e gpg-pubkey-<last 8 hex of the fingerprint, lowercased>`) and re-import the
+   keyring.
 
-   ```bash
-   NEWPASS="$(openssl rand -base64 32)"
-   printf '%s\n%s\n' "$PASS" "$NEWPASS" | gpg --batch --pinentry-mode loopback \
-     --command-fd 0 --passwd "$FPR"
-   ```
-
-   Rotating the passphrase only re-protects **this keyring** — the vault's
-   `root-offline.asc` is still encrypted under the leaked passphrase. Re-export and
-   replace the vault entry (and its stored passphrase), or the rotation changed
-   nothing:
-
-   ```bash
-   gpg --batch --pinentry-mode loopback --passphrase "$NEWPASS" \
-     --armor --export-secret-keys "$FPR" > root-offline.asc
-   ```
-3. Re-upload the public key — it now carries the revocation, so verifiers reject
-   anything the old subkey signs from here on.
-4. Re-sign and re-upload the latest packages with the new subkey, and audit Artifact
-   Registry for packages signed inside the compromise window.
-
-If the **root** may have leaked (vault breach): import the printed revocation
-certificate (delete its leading-colon guard first), publish the revoked key, and run a
-full ceremony — this is the one case where customers must re-trust a new key.
-
-## Current state
-
-- Once the plumbing PRs land, `vm-agent` and `odigos` release workflows sign every
-  `.deb`/`.rpm` **fail-closed** — a missing or empty `ODIGOS_PKG_SIGNING_KEY` fails
-  the release, it never silently ships unsigned.
-- The secrets still hold the **throwaway TEST key**; packages signed today validate
-  plumbing only and must not be trusted.
-- Customer-facing install docs stay on `gpgcheck=0` / no key import until the real
-  key ships via the ceremony above — flipping docs to `gpgcheck=1` and publishing the
-  key is a separate, later phase.
+A compromised key stays listed in the keyring and table for the record, but anything it
+signed after the compromise date must be treated as untrusted.
