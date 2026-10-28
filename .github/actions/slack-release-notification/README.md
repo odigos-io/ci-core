@@ -24,6 +24,7 @@ This action sends Slack notifications based on job status for release updates. I
 | `failure-description` | Description message for failed releases | Yes | "Release failed" |
 | `tag` | Release tag | No | - |
 | `release-pr-link` | Release PR link | No | - |
+| `status` | `success` or `failure`. Overrides `job.status`; pass it when calling from inside a composite action, where `job.status` doesn't reflect the action's own failed steps | No | `job.status` |
 
 ## Slack Message Format
 
