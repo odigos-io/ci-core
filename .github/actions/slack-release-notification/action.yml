@@ -17,42 +17,53 @@ inputs:
   release-pr-link:
     description: 'If this update includes a release PR, this is the link to it'
     required: false
+  status:
+    description: "'success' or 'failure'. Defaults to job.status; composite actions must pass it, because job.status doesn't reflect their own failed steps"
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
   steps:
     - name: Determine Job Status and Notify Slack
       shell: bash
+      env:
+        STATUS: ${{ inputs.status || job.status }}
+        WEBHOOK_URL: ${{ inputs.webhook-url }}
+        SUCCESS_DESCRIPTION: ${{ inputs.success-description }}
+        FAILURE_DESCRIPTION: ${{ inputs.failure-description }}
+        TAG: ${{ inputs.tag }}
+        RELEASE_PR_LINK: ${{ inputs.release-pr-link }}
       run: |
         REPO="${{ github.repository }}" # <owner>/<repository_name>
         REPOSITORY_NAME=$(basename "$REPO") # <repository_name>
 
         WORKFLOW_RUN_URL="${{ github.server_url }}/$REPO/actions/runs/${{ github.run_id }}"
 
-        if [ "${{ job.status }}" = "success" ]; then
+        if [ "$STATUS" = "success" ]; then
           echo "Release notification SUCCESS"
           PAYLOAD=$(jq -n \
-            --arg desc "✅ ${{ inputs.success-description }}" \
-            --arg tag "${{ inputs.tag }}" \
+            --arg desc "✅ $SUCCESS_DESCRIPTION" \
+            --arg tag "$TAG" \
             --arg repo_name "$REPOSITORY_NAME" \
-            --arg release_pr_link "${{ inputs.release-pr-link }}" \
+            --arg release_pr_link "$RELEASE_PR_LINK" \
             --arg link "$WORKFLOW_RUN_URL" \
             '{description: $desc, tag: $tag, repo_name: $repo_name, release_pr_link: $release_pr_link, link: $link}')
           echo "Success payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "${{ inputs.webhook-url }}"
+            "$WEBHOOK_URL"
         else
           echo "Release notification FAILURE (ci workflow failed or cancelled)"
           PAYLOAD=$(jq -n \
             --arg link "$WORKFLOW_RUN_URL" \
-            --arg desc "❌ ${{ inputs.failure-description }}" \
-            --arg tag "${{ inputs.tag }}" \
+            --arg desc "❌ $FAILURE_DESCRIPTION" \
+            --arg tag "$TAG" \
             --arg repo_name "$REPOSITORY_NAME" \
             '{link: $link, description: $desc, tag: $tag, repo_name: $repo_name}')
 
           echo "Failure payload: $PAYLOAD"
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "${{ inputs.webhook-url }}"
+            "$WEBHOOK_URL"
         fi
