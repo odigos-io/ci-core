@@ -1,8 +1,8 @@
 # apply-agent-version-update
 
-Consumer-side half of the instrumentation-agent version-update flow. Runs the repo's
-`upgrade-agent` make target and, if anything changed, opens an auto-merging PR and notifies
-Slack.
+Consumer-side half of the instrumentation-agent version-update flow. Logs in to public ECR, runs
+the repo's `upgrade-agent` make target (with retries) and, if anything changed, opens an
+auto-merging PR. Slack is notified when a PR is opened or updated, or when the update fails.
 
 The per-repo mapping (category → image/module, Dockerfile vs go.mod) lives in that repo's
 `upgrade-agent` make target — not here.
@@ -39,6 +39,26 @@ jobs:
 | `make_dir` | no | `.` | Directory containing the repo's `agent-deps.mk`. |
 | `webhook-url` | yes | — | Slack webhook for the release-status notification. |
 | `automerge` | no | `true` | Enable auto-merge on the created PR. |
+| `ecr-login` | no | `true` | Log in to public ECR before running `make`. Set `false` to pull anonymously. |
+| `ecr-role-to-assume` | no | `arn:aws:iam::061717858829:role/ecr-pull-push-role` | IAM role assumed over OIDC for the ECR login. |
+
+## Reliability
+
+- **Public ECR login.** Digest lookups (`docker buildx imagetools inspect public.ecr.aws/...`) from
+  shared runner IPs hit public ECR's anonymous rate and data limits (`429 Too Many Requests`). The
+  action assumes `ecr-role-to-assume` over OIDC, which needs `id-token: write` on the calling job and
+  the role's trust policy to cover the calling repo. The AWS credentials are kept out of the job
+  environment and used only for `docker login`, and the registry login is removed right after `make`.
+  If the role can't be assumed or the login fails, the run continues anonymously with a warning.
+- **Retries.** `upgrade-agent` gets 3 attempts (30s, then 60s apart). Tracked files are
+  restored between attempts so a partial rewrite never reaches the PR, which is why the target must
+  be idempotent (see the contract below).
+- **Input validation.** `instrumentation_agent` and `version` must match `^[A-Za-z0-9._-]+$`,
+  because make expands them into recipe shells.
+- **Failure alerts.** A failed or cancelled update, or a failure while opening or auto-merging the
+  PR, posts the failure message to `webhook-url`. The result is
+  derived from this action's own steps, because `job.status` doesn't reflect failures inside a
+  composite action. Steps the calling job runs before this action (token, checkout) aren't covered.
 
 ## Contract
 
@@ -49,7 +69,8 @@ make -f agent-deps.mk upgrade-agent INSTRUMENTATION_AGENT=<instrumentation_agent
 ```
 
 It must update whatever that repo pins for the instrumentation (Dockerfile image tags and/or
-`go.mod`/`go.sum`) and **no-op on unknown instrumentations** so releases can broadcast safely.
+`go.mod`/`go.sum`), **no-op on unknown instrumentations** so releases can broadcast safely, and be
+**idempotent** so a retry after a partial run produces the same result.
 
 ## Canonical instrumentations
 
