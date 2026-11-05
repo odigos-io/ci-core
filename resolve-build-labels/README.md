@@ -19,7 +19,14 @@ Create these labels in each consuming repository (or via org-level label sync). 
 | `no-cache` | `true` if `build: no-cache` is present | `true` / `false` |
 | `platforms` | Platforms string for `docker/build-push-action` | `linux/amd64` or `linux/amd64,linux/arm64` |
 
-Outside of `pull_request` events (no labels in context), outputs fall back to amd64-only with cache enabled.
+Outside of `pull_request` events (no labels in context), outputs fall back to amd64-only with cache enabled unless overridden via inputs.
+
+## Inputs
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `platforms` | If set, use this platforms string instead of label resolution | _(empty — resolve from labels)_ |
+| `no-cache` | If set to `true`/`false`, use this instead of label resolution | _(empty — resolve from labels)_ |
 
 ## Permission Requirements
 
@@ -68,9 +75,21 @@ jobs:
           tags: myimage:pr
 ```
 
+### Release workflows (force options)
+
+```yaml
+- name: Resolve build options
+  id: build-opts
+  uses: odigos-io/ci-core/resolve-build-labels@main
+  with:
+    platforms: linux/amd64,linux/arm64
+    no-cache: "true"
+```
+
 ## Examples
 
 - No labels → `platforms=linux/amd64`, `no-cache=false`
 - `build: arm` → `platforms=linux/amd64,linux/arm64`, `no-cache=false`
 - `build: no-cache` → `platforms=linux/amd64`, `no-cache=true`
 - Both labels → `platforms=linux/amd64,linux/arm64`, `no-cache=true`
+- Input overrides → use `platforms` / `no-cache` inputs as-is
