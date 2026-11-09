@@ -16,9 +16,10 @@ inputs:
     description: |
       '&'-separated list of consumer repos to dispatch to (commas/spaces/newlines also accepted).
       Valid entries: odigos, odigos-enterprise, vm-agent.
-      Defaults to all three (consumers that don't pin this instrumentation no-op safely).
+      Defaults to odigos and vm-agent (consumers that don't pin this instrumentation no-op safely).
+      odigos-enterprise no longer builds odiglet, so it is only reached when listed explicitly.
     required: false
-    default: "odigos&odigos-enterprise&vm-agent"
+    default: "odigos&vm-agent"
 
 runs:
   using: composite
