@@ -30,7 +30,7 @@ jobs:
 |---|---|---|---|
 | `instrumentation_agent` | yes | — | Language instrumentation being released (e.g. `php`, `ruby`, `python`, `golang`, …). |
 | `version` | yes | — | Released version to propagate (e.g. `v0.11.0`). |
-| `consumers` | no | `odigos&odigos-enterprise&vm-agent` | `&`-separated consumer repos to dispatch to (commas/spaces/newlines also accepted). Valid: `odigos`, `odigos-enterprise`, `vm-agent`. |
+| `consumers` | no | `odigos&vm-agent` | `&`-separated consumer repos to dispatch to (commas/spaces/newlines also accepted). Valid: `odigos`, `odigos-enterprise`, `vm-agent`. |
 
 ## Notes
 
