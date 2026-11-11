@@ -3,9 +3,16 @@ description: |
   Reads pull request labels to decide Docker build options.
   Supported labels: "build: arm" (also build linux/arm64) and "build: no-cache"
   (build without Docker layer cache). Defaults to linux/amd64 with cache enabled.
-  Optional inputs override label resolution (useful for release workflows).
+  Set release to 'true' to build both platforms without cache regardless of labels.
+  Optional platforms/no-cache inputs override everything else.
 
 inputs:
+  release:
+    description: >
+      'true' for a release build (e.g. a PR to a release branch): build
+      linux/amd64,linux/arm64 without the layer cache, ignoring PR labels.
+    required: false
+    default: "false"
   platforms:
     description: >
       If set, use this platforms value instead of resolving from PR labels
@@ -39,6 +46,7 @@ runs:
       env:
         # Comma-joined label names; empty outside pull_request events.
         PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        RELEASE: ${{ inputs.release }}
         OVERRIDE_PLATFORMS: ${{ inputs.platforms }}
         OVERRIDE_NO_CACHE: ${{ inputs.no-cache }}
       run: |
@@ -58,6 +66,17 @@ runs:
               ;;
           esac
         done
+
+        # Release builds ignore the labels: both platforms, no layer cache.
+        if [ "${RELEASE}" = "true" ]; then
+          BUILD_ARM=true
+          NO_CACHE=true
+          SOURCE_PLATFORMS="release"
+          SOURCE_NO_CACHE="release"
+        else
+          SOURCE_PLATFORMS="\`build: arm\` → ${BUILD_ARM}"
+          SOURCE_NO_CACHE="\`build: no-cache\` → ${NO_CACHE}"
+        fi
 
         if [ "$BUILD_ARM" = true ]; then
           PLATFORMS="linux/amd64,linux/arm64"
@@ -89,12 +108,12 @@ runs:
         if [ -n "${OVERRIDE_PLATFORMS}" ]; then
           echo "| Platforms | \`${PLATFORMS}\` | input override |" >> "$GITHUB_STEP_SUMMARY"
         else
-          echo "| Platforms | \`${PLATFORMS}\` | \`build: arm\` → ${BUILD_ARM} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platforms | \`${PLATFORMS}\` | ${SOURCE_PLATFORMS} |" >> "$GITHUB_STEP_SUMMARY"
         fi
         if [ -n "${OVERRIDE_NO_CACHE}" ]; then
           echo "| No cache | \`${NO_CACHE}\` | input override |" >> "$GITHUB_STEP_SUMMARY"
         else
-          echo "| No cache | \`${NO_CACHE}\` | \`build: no-cache\` → ${NO_CACHE} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| No cache | \`${NO_CACHE}\` | ${SOURCE_NO_CACHE} |" >> "$GITHUB_STEP_SUMMARY"
         fi
 
         echo "Platforms: ${PLATFORMS}"
