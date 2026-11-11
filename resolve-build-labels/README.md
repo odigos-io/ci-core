@@ -21,10 +21,13 @@ Create these labels in each consuming repository (or via org-level label sync). 
 
 Outside of `pull_request` events (no labels in context), outputs fall back to amd64-only with cache enabled unless overridden via inputs.
 
+Precedence, highest first: the `platforms` / `no-cache` inputs, then `release`, then the labels.
+
 ## Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
+| `release` | `true` for a release build: `linux/amd64,linux/arm64` without cache, ignoring labels | `false` |
 | `platforms` | If set, use this platforms string instead of label resolution | _(empty — resolve from labels)_ |
 | `no-cache` | If set to `true`/`false`, use this instead of label resolution | _(empty — resolve from labels)_ |
 
@@ -75,12 +78,21 @@ jobs:
           tags: myimage:pr
 ```
 
-### Release workflows (force options)
+### Release builds
+
+For PRs to a release branch (or release workflows), set `release` to build both platforms without cache regardless of labels:
 
 ```yaml
 - name: Resolve build options
   id: build-opts
   uses: odigos-io/ci-core/resolve-build-labels@main
+  with:
+    release: ${{ startsWith(github.base_ref, 'releases/') }}
+```
+
+To force specific values instead, pass `platforms` and/or `no-cache` directly:
+
+```yaml
   with:
     platforms: linux/amd64,linux/arm64
     no-cache: "true"
@@ -92,4 +104,5 @@ jobs:
 - `build: arm` → `platforms=linux/amd64,linux/arm64`, `no-cache=false`
 - `build: no-cache` → `platforms=linux/amd64`, `no-cache=true`
 - Both labels → `platforms=linux/amd64,linux/arm64`, `no-cache=true`
+- `release: true` → `platforms=linux/amd64,linux/arm64`, `no-cache=true`, whatever the labels
 - Input overrides → use `platforms` / `no-cache` inputs as-is
