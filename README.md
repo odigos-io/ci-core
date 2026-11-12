@@ -15,6 +15,7 @@
 
 ### Build Configuration
 1. [resolve-build-labels](./resolve-build-labels/README.md)
+1. [resolve-kubernetes-test-versions](./resolve-kubernetes-test-versions/README.md) — Kubernetes versions to test against, from `test-k8s/<version>` PR labels
 
 ### Security and Supply Chain
 1. [vulnerabilities-scanner](./vulnerabilities-scanner/README.md)

@@ -1,0 +1,110 @@
+name: "Resolve Kubernetes Test Versions"
+description: |
+  Reads pull request labels to decide which Kubernetes versions to test against.
+  Each "test-k8s/<version>" label (e.g. "test-k8s/1.29") adds a version to the
+  default one. Set release to 'true' to also test the release-versions, e.g. the
+  minimum, a middle and the latest supported version. Outside pull_request events,
+  only the default version (and the release-versions for a release) is tested.
+
+inputs:
+  default-version:
+    description: "Kubernetes version that is always tested, e.g. 1.32"
+    required: true
+  release:
+    description: >
+      'true' for a release (e.g. a PR to a release branch): also test the
+      release-versions. Labels still add versions on top of them.
+    required: false
+    default: "false"
+  release-versions:
+    description: >
+      Comma-separated versions a release also tests, e.g. the minimum, a middle and
+      the latest supported version: "1.21.12,1.29,1.37". Required when release is 'true'.
+    required: false
+    default: ""
+  label-prefix:
+    description: "Prefix of the labels that add a version; the rest of the label is the version"
+    required: false
+    default: "test-k8s/"
+
+outputs:
+  versions:
+    description: "JSON array of the default version followed by the additional ones, e.g. [\"1.32\",\"1.21.12\",\"1.29\",\"1.37\"]"
+    value: ${{ steps.resolve.outputs.versions }}
+  additional-versions:
+    description: "JSON array of the versions the release and labels add, without the default one, e.g. [\"1.21.12\",\"1.29\",\"1.37\"]"
+    value: ${{ steps.resolve.outputs.additional-versions }}
+  has-additional-versions:
+    description: "true if the release or labels add at least one version"
+    value: ${{ steps.resolve.outputs.has-additional-versions }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Kubernetes versions from PR labels
+      id: resolve
+      shell: bash
+      env:
+        DEFAULT_VERSION: ${{ inputs.default-version }}
+        RELEASE: ${{ inputs.release }}
+        RELEASE_VERSIONS: ${{ inputs.release-versions }}
+        LABEL_PREFIX: ${{ inputs.label-prefix }}
+        # JSON array of label names; null outside pull_request events.
+        PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$DEFAULT_VERSION" ]; then
+          echo "::error::The default-version input is empty."
+          exit 1
+        fi
+        case "$RELEASE" in
+          true|false) ;;
+          *)
+            echo "::error::The release input must be 'true' or 'false', got '${RELEASE}'."
+            exit 1
+            ;;
+        esac
+
+        RELEASE_VERSIONS_JSON='[]'
+        if [ "$RELEASE" = "true" ]; then
+          RELEASE_VERSIONS_JSON=$(jq -cn --arg versions "$RELEASE_VERSIONS" \
+            '[$versions | split(",")[] | gsub("^\\s+|\\s+$"; "") | select(. != "")]')
+          if [ "$RELEASE_VERSIONS_JSON" = "[]" ]; then
+            echo "::error::release is 'true' but the release-versions input is empty."
+            exit 1
+          fi
+        fi
+
+        # Each version once, with where it first came from: the default, then the release
+        # versions in their given order, then the labels.
+        ENTRIES=$(jq -cn \
+          --arg default "$DEFAULT_VERSION" \
+          --arg prefix "$LABEL_PREFIX" \
+          --argjson release "$RELEASE_VERSIONS_JSON" \
+          --argjson labels "${PR_LABELS:-null}" \
+          '[{version: $default, source: "default"}]
+            + [$release[] | {version: ., source: "release"}]
+            + [
+                [($labels // [])[] | select(startswith($prefix)) | ltrimstr($prefix) | select(. != "")]
+                | unique[]
+                | {version: ., source: "`\($prefix)\(.)` label"}
+              ]
+          | reduce .[] as $e ([]; if any(.[]; .version == $e.version) then . else . + [$e] end)')
+
+        VERSIONS=$(jq -c '[.[].version]' <<< "$ENTRIES")
+        ADDITIONAL_VERSIONS=$(jq -c '[.[1:][].version]' <<< "$ENTRIES")
+        HAS_ADDITIONAL_VERSIONS=$(jq -r 'length > 0' <<< "$ADDITIONAL_VERSIONS")
+
+        echo "versions=${VERSIONS}" >> "$GITHUB_OUTPUT"
+        echo "additional-versions=${ADDITIONAL_VERSIONS}" >> "$GITHUB_OUTPUT"
+        echo "has-additional-versions=${HAS_ADDITIONAL_VERSIONS}" >> "$GITHUB_OUTPUT"
+
+        echo "## Kubernetes versions from PR labels" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Version | Source |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|---------|--------|" >> "$GITHUB_STEP_SUMMARY"
+        jq -r '.[] | "| `\(.version)` | \(.source) |"' <<< "$ENTRIES" >> "$GITHUB_STEP_SUMMARY"
+
+        echo "Versions: ${VERSIONS}"
+        echo "Additional versions: ${ADDITIONAL_VERSIONS}"
