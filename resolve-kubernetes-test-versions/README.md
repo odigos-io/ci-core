@@ -1,6 +1,6 @@
 # Resolve Kubernetes Test Versions
 
-Reads pull request labels and exposes the Kubernetes versions to run tests against, for consuming workflows to use as a job matrix.
+Reads pull request labels and exposes the Kubernetes versions to run tests against, for consuming workflows to use as a job matrix. A release also tests a fixed set of versions, e.g. the minimum, a middle and the latest supported version.
 
 ## Labels
 
@@ -12,11 +12,17 @@ A PR can have several of these labels. A label for the default version adds noth
 
 Create these labels in each consuming repository for the versions it supports. The `label-prefix` input changes the `test-k8s/` prefix.
 
+## Releases
+
+With `release: "true"`, the `release-versions` are tested too, e.g. the minimum, a middle and the latest supported version. Pass `release` from whatever marks a release in the workflow, e.g. a PR to a release branch. Labels still add versions on top of the release versions.
+
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `default-version` | yes | | Version that is always tested, e.g. `1.32` |
+| `release` | no | `false` | `true` for a release: also test the `release-versions` |
+| `release-versions` | when `release` is `true` | | Comma-separated versions a release also tests, e.g. `1.21.12,1.29,1.37` |
 | `label-prefix` | no | `test-k8s/` | Prefix of the labels that add a version |
 
 ## Outputs
@@ -24,10 +30,12 @@ Create these labels in each consuming repository for the versions it supports. T
 | Output | Description | Example |
 |--------|-------------|---------|
 | `versions` | JSON array of the default version followed by the additional ones | `["1.32","1.29"]` |
-| `additional-versions` | JSON array of the versions the labels add, without the default one | `["1.29"]` |
-| `has-additional-versions` | `true` if the labels add at least one version | `true` / `false` |
+| `additional-versions` | JSON array of the versions the release and labels add, without the default one | `["1.29"]` |
+| `has-additional-versions` | `true` if the release or labels add at least one version | `true` / `false` |
 
-Outside of `pull_request` events (no labels in context, e.g. `merge_group`), `versions` is only the default version and `additional-versions` is `[]`.
+Versions are ordered the default first, then the release versions in their given order, then the labelled ones sorted. Each version appears once; the step summary lists where it came from.
+
+Outside of `pull_request` events (no labels in context, e.g. `merge_group`), `versions` is only the default version, plus the release versions for a release.
 
 ## Permission Requirements
 
@@ -59,6 +67,9 @@ jobs:
         uses: odigos-io/ci-core/resolve-kubernetes-test-versions@main
         with:
           default-version: "1.32"
+          # PRs and merge queue entries targeting a release branch.
+          release: ${{ startsWith(github.base_ref, 'releases/') || startsWith(github.event.merge_group.base_ref, 'refs/heads/releases/') }}
+          release-versions: "1.21.12,1.29,1.37"
 
   e2e:
     needs: resolve-versions
@@ -91,3 +102,8 @@ With `default-version: "1.32"`:
 - `test-k8s/1.29` → `versions=["1.32","1.29"]`, `additional-versions=["1.29"]`, `has-additional-versions=true`
 - `test-k8s/1.34` and `test-k8s/1.29` → `versions=["1.32","1.29","1.34"]`, `additional-versions=["1.29","1.34"]`
 - `test-k8s/1.32` → `versions=["1.32"]`, `additional-versions=[]`
+
+With `release: "true"` and `release-versions: "1.21.12,1.29,1.37"` as well:
+
+- No labels → `versions=["1.32","1.21.12","1.29","1.37"]`, `additional-versions=["1.21.12","1.29","1.37"]`
+- `test-k8s/1.34` and `test-k8s/1.29` → `versions=["1.32","1.21.12","1.29","1.37","1.34"]`
