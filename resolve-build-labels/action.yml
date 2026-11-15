@@ -3,6 +3,14 @@ description: |
   Reads pull request labels to decide Docker build options.
   Supported labels: "build: arm" (also build linux/arm64) and "build: no-cache"
   (build without Docker layer cache). Defaults to linux/amd64 with cache enabled.
+  On PR events the labels are read from the PR when the job runs, so a re-run sees
+  labels added or removed since the run started.
+
+inputs:
+  github-token:
+    description: "Token that reads the PR's labels; needs pull-requests: read. Defaults to the job's token."
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   build-arm:
@@ -18,20 +26,53 @@ outputs:
 runs:
   using: composite
   steps:
+    # A re-run replays the event that started the run, so the event's labels can be stale.
+    # Read the PR's labels as they are now, and fall back to the event's if that fails.
+    - name: Read PR labels
+      id: labels
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        # Empty outside pull_request and pull_request_target events.
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$PR_NUMBER" ]; then
+          echo "labels=[]" >> "$GITHUB_OUTPUT"
+          echo "source=none" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if LABELS=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name' |
+          jq -Rsc 'split("\n") | map(select(. != ""))'); then
+          SOURCE=pr
+        else
+          echo "::warning::Could not read the labels of PR #${PR_NUMBER}; using the labels of the event that started this run. Grant the job pull-requests: read."
+          LABELS=$(jq -c '. // []' <<< "$EVENT_LABELS")
+          SOURCE=event
+        fi
+
+        echo "labels=${LABELS}" >> "$GITHUB_OUTPUT"
+        echo "source=${SOURCE}" >> "$GITHUB_OUTPUT"
+        echo "Labels (${SOURCE}): ${LABELS}"
+
     - name: Resolve build options from PR labels
       id: resolve
       shell: bash
       env:
-        # Comma-joined label names; empty outside pull_request events.
-        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        # JSON array of label names; empty outside PR events.
+        PR_LABELS: ${{ steps.labels.outputs.labels }}
+        LABELS_SOURCE: ${{ steps.labels.outputs.source }}
       run: |
         set -euo pipefail
 
         BUILD_ARM=false
         NO_CACHE=false
 
-        IFS=',' read -ra LABELS <<< "${PR_LABELS}"
-        for label in "${LABELS[@]}"; do
+        while IFS= read -r label; do
           case "$label" in
             "build: arm")
               BUILD_ARM=true
@@ -40,7 +81,7 @@ runs:
               NO_CACHE=true
               ;;
           esac
-        done
+        done < <(jq -r '.[]' <<< "${PR_LABELS:-[]}")
 
         if [ "$BUILD_ARM" = true ]; then
           PLATFORMS="linux/amd64,linux/arm64"
@@ -53,6 +94,12 @@ runs:
         echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
 
         echo "## Build options from PR labels" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        case "$LABELS_SOURCE" in
+          pr) echo "Labels read from the PR when this job ran." >> "$GITHUB_STEP_SUMMARY" ;;
+          event) echo "Labels read from the event that started this run; they may be stale on a re-run." >> "$GITHUB_STEP_SUMMARY" ;;
+          *) echo "Not a PR event, so no labels were read." >> "$GITHUB_STEP_SUMMARY" ;;
+        esac
         echo "" >> "$GITHUB_STEP_SUMMARY"
         echo "| Option | Value | Label |" >> "$GITHUB_STEP_SUMMARY"
         echo "|--------|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
