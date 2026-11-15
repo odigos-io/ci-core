@@ -18,17 +18,19 @@ A GitHub Actions composite action that scans container images or filesystem path
 |-------|-------------|----------|---------|---------|
 | `image` | Container image to scan (e.g., `nginx:latest`, `myregistry.com/myimage:tag`) | No* | - | - |
 | `path` | Filesystem path to scan (e.g., `.` or `src/`) | No* | - | - |
+| `images` | Container images to scan in one run, one `<name>=<image>` per line. Each image's results are written to `<results-dir>/<name>.json`. | No* | - | - |
 | `severity-cutoff` | Comma-separated list of severity levels that will cause the workflow to fail (e.g., `HIGH,CRITICAL`). Leave empty to never fail. | No | `HIGH,CRITICAL` | - |
 | `verbosiry` | The verbosity level for the action summary | No* | `basic` | `basic`/`detailed` |
 
-\* You must provide either `image` or `path`, but not both.
+\* You must provide exactly one of `image`, `path` or `images`.
 
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
 | `results-file` | Path to the raw Grype JSON results file. Always written, at any size. |
-| `total-count` | Total number of matches found |
+| `results-dir` | With `images`: the directory holding each scanned image's `<name>.json`. |
+| `total-count` | Total number of matches found, across all images with `images` |
 | `critical-count` | Number of CRITICAL severity matches |
 | `high-count` | Number of HIGH severity matches |
 | `cutoff-exceeded` | `'true'` when findings at or above `severity-cutoff` were present. Set even when the step is wrapped in `continue-on-error`. |
@@ -56,6 +58,27 @@ steps:
     uses: odigos-io/ci-core/vulnerabilities-scanner@main
     with:
       path: .
+```
+
+### Scan several images in one run
+Grype downloads its vulnerability database once and reuses it for every image. An image that
+cannot be scanned fails the step after the other images are scanned and reported.
+```yaml
+steps:
+  - name: Scan images for vulnerabilities
+    id: scan
+    uses: odigos-io/ci-core/vulnerabilities-scanner@main
+    with:
+      images: |
+        collector=myregistry.com/collector:tag
+        odiglet=myregistry.com/odiglet:tag
+      severity-cutoff: ""
+
+  - name: Process scan results
+    run: |
+      for results in "${{ steps.scan.outputs.results-dir }}"/*.json; do
+        echo "$(basename "$results" .json): $(jq '.matches | length' "$results")"
+      done
 ```
 
 ### Fail only on critical vulnerabilities

@@ -8,6 +8,9 @@ inputs:
   path:
     description: "Path to the file system to scan (e.g., a directory containing source code or extracted image layers)"
     required: false
+  images:
+    description: "Container images to scan in one run, one '<name>=<image>' per line. Each image's results are written to <results-dir>/<name>.json."
+    required: false
   severity-cutoff:
     description: "Comma-separated list of severity levels that will cause the workflow to fail (e.g., 'HIGH,CRITICAL' or 'CRITICAL'). Leave empty to never fail."
     required: false
@@ -21,8 +24,11 @@ outputs:
   results-file:
     description: "Path to the raw Grype JSON results file. Always written, at any size."
     value: ${{ steps.process-results.outputs.results-file }}
+  results-dir:
+    description: "With 'images': the directory holding each scanned image's <name>.json."
+    value: ${{ steps.process-results.outputs.results-dir }}
   total-count:
-    description: "Total number of matches found"
+    description: "Total number of matches found, across all images with 'images'"
     value: ${{ steps.process-results.outputs.total-count }}
   critical-count:
     description: "Number of CRITICAL severity matches"
@@ -38,11 +44,20 @@ runs:
   using: composite
   steps:
     - name: Validate Inputs
-      if: ${{ (inputs.image == '' && inputs.path == '') || (inputs.image != '' && inputs.path != '') }}
       shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        SCAN_PATH: ${{ inputs.path }}
+        IMAGES: ${{ inputs.images }}
       run: |
-        echo "Error: You must provide either 'image' or 'path' input."
-        exit 1
+        provided=0
+        for input in "$IMAGE" "$SCAN_PATH" "$IMAGES"; do
+          [ -n "$input" ] && provided=$((provided + 1))
+        done
+        if [ "$provided" -ne 1 ]; then
+          echo "Error: You must provide exactly one of the 'image', 'path' or 'images' inputs."
+          exit 1
+        fi
 
     - name: Allocate results file
       shell: bash
@@ -50,6 +65,7 @@ runs:
         # A unique file per invocation: callers routinely run several scans in one
         # job, and a fixed filename would have each scan overwrite the last.
         echo "GRYPE_RESULTS_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/grype-results-XXXXXXXX.json")" >> "$GITHUB_ENV"
+        echo "GRYPE_RESULTS_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/grype-results-XXXXXXXX")" >> "$GITHUB_ENV"
 
     - name: Install Grype
       shell: bash
@@ -83,11 +99,36 @@ runs:
           --only-fixed \
           --file "$GRYPE_RESULTS_FILE"
 
+    # Scans every image even when one fails, so the others still report, then fails the step.
+    # Grype downloads its vulnerability database on the first scan and reuses it for the rest.
+    - name: Scan Images for Vulnerabilities
+      if: ${{ inputs.images != '' }}
+      shell: bash
+      env:
+        IMAGES: ${{ inputs.images }}
+      run: |
+        set -uo pipefail
+        failed=()
+        while IFS='=' read -r name image; do
+          [ -n "$name" ] || continue
+          echo "::group::Scan $name ($image)"
+          if ! grype "$image" -o json --only-fixed --file "$GRYPE_RESULTS_DIR/$name.json"; then
+            failed+=("$name")
+            rm -f "$GRYPE_RESULTS_DIR/$name.json"
+          fi
+          echo "::endgroup::"
+        done <<< "$IMAGES"
+        if [ ${#failed[@]} -gt 0 ]; then
+          echo "::error::Could not scan: ${failed[*]}"
+          exit 1
+        fi
+
     - name: Display in Summary
       if: always()
       id: process-results
       shell: bash
       env:
+        IMAGES: ${{ inputs.images }}
         SEVERITY_CUTOFF_INPUT: ${{ inputs.severity-cutoff }}
         VERBOSITY: ${{ inputs.verbosity }}
       run: |
@@ -98,50 +139,12 @@ runs:
 
         # This step is if: always(), so it can run even when input validation bailed
         # out before a results file was ever allocated.
-        JSON_FILE="${GRYPE_RESULTS_FILE:-${RUNNER_TEMP:-/tmp}/grype-results-unallocated.json}"
-        echo "results-file=$JSON_FILE" >> "$GITHUB_OUTPUT"
-
-        # No file means grype never produced a report. Emit an empty-but-valid
-        # document so downstream consumers always have well-formed JSON to read.
-        if [ ! -s "$JSON_FILE" ]; then
-          echo '{"matches":[]}' > "$JSON_FILE"
-          echo "✅ No vulnerabilities found!" >> "$GITHUB_STEP_SUMMARY"
-          {
-            echo "total-count=0"
-            echo "critical-count=0"
-            echo "high-count=0"
-            echo "cutoff-exceeded=false"
-          } >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
+        RESULTS_FILE="${GRYPE_RESULTS_FILE:-${RUNNER_TEMP:-/tmp}/grype-results-unallocated.json}"
+        echo "results-file=$RESULTS_FILE" >> "$GITHUB_OUTPUT"
+        echo "results-dir=${GRYPE_RESULTS_DIR:-}" >> "$GITHUB_OUTPUT"
 
         SEVERITY_CUTOFF="$(echo "$SEVERITY_CUTOFF_INPUT" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
         VERBOSITY_NORMALIZED="$(echo "${VERBOSITY:-basic}" | tr '[:upper:]' '[:lower:]')"
-
-        TOTAL="$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")"
-        CRITICAL="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "critical")] | length' "$JSON_FILE")"
-        HIGH="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "high")] | length' "$JSON_FILE")"
-        MEDIUM="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "medium")] | length' "$JSON_FILE")"
-        LOW="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "low")] | length' "$JSON_FILE")"
-        NEGLIGIBLE="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "negligible")] | length' "$JSON_FILE")"
-        UNKNOWN="$(jq '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == "unknown")] | length' "$JSON_FILE")"
-
-        {
-          echo "total-count=$TOTAL"
-          echo "critical-count=$CRITICAL"
-          echo "high-count=$HIGH"
-        } >> "$GITHUB_OUTPUT"
-
-        echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
-        echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| 🔴 Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| 🟠 High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| 🟡 Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| 🔵 Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| ⚪ Negligible | $NEGLIGIBLE |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| ❔ Unknown | $UNKNOWN |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| **Total** | **$TOTAL** |" >> "$GITHUB_STEP_SUMMARY"
-        echo "" >> "$GITHUB_STEP_SUMMARY"
 
         write_vulnerability_basic() {
           local match="$1"
@@ -222,12 +225,74 @@ runs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
         }
 
-        write_section "critical" "🔴 Critical Vulnerabilities" "$CRITICAL" "false"
-        write_section "high" "🟠 High Vulnerabilities" "$HIGH" "false"
-        write_section "medium" "🟡 Medium Vulnerabilities" "$MEDIUM" "true"
-        write_section "low" "🔵 Low Vulnerabilities" "$LOW" "true"
-        write_section "negligible" "⚪ Negligible Vulnerabilities" "$NEGLIGIBLE" "true"
-        write_section "unknown" "❔ Unknown Vulnerabilities" "$UNKNOWN" "true"
+        TOTAL=0 CRITICAL=0 HIGH=0 MEDIUM=0 LOW=0 NEGLIGIBLE=0 UNKNOWN=0
+
+        count_severity() {
+          jq --arg severity "$1" '[.matches // [] | .[] | select((.vulnerability.severity // "" | ascii_downcase) == $severity)] | length' "$JSON_FILE"
+        }
+
+        # Writes the summary of one results file and adds its counts to the totals.
+        report() {
+          JSON_FILE="$1"
+
+          # No file means grype never produced a report. Emit an empty-but-valid
+          # document so downstream consumers always have well-formed JSON to read.
+          if [ ! -s "$JSON_FILE" ]; then
+            echo '{"matches":[]}' > "$JSON_FILE"
+            echo "✅ No vulnerabilities found!" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            return 0
+          fi
+
+          local total critical high medium low negligible unknown
+          total="$(jq '[.matches // [] | .[]] | length' "$JSON_FILE")"
+          critical="$(count_severity critical)"
+          high="$(count_severity high)"
+          medium="$(count_severity medium)"
+          low="$(count_severity low)"
+          negligible="$(count_severity negligible)"
+          unknown="$(count_severity unknown)"
+
+          echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔴 Critical | $critical |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🟠 High | $high |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🟡 Medium | $medium |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔵 Low | $low |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ⚪ Negligible | $negligible |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ❔ Unknown | $unknown |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Total** | **$total** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          write_section "critical" "🔴 Critical Vulnerabilities" "$critical" "false"
+          write_section "high" "🟠 High Vulnerabilities" "$high" "false"
+          write_section "medium" "🟡 Medium Vulnerabilities" "$medium" "true"
+          write_section "low" "🔵 Low Vulnerabilities" "$low" "true"
+          write_section "negligible" "⚪ Negligible Vulnerabilities" "$negligible" "true"
+          write_section "unknown" "❔ Unknown Vulnerabilities" "$unknown" "true"
+
+          TOTAL=$((TOTAL + total)) CRITICAL=$((CRITICAL + critical)) HIGH=$((HIGH + high))
+          MEDIUM=$((MEDIUM + medium)) LOW=$((LOW + low)) NEGLIGIBLE=$((NEGLIGIBLE + negligible))
+          UNKNOWN=$((UNKNOWN + unknown))
+        }
+
+        if [ -n "$IMAGES" ]; then
+          # An image the scan step could not scan has no results file, and the scan step already failed for it.
+          for json_file in "${GRYPE_RESULTS_DIR:-/nonexistent}"/*.json; do
+            [ -e "$json_file" ] || continue
+            echo "## 📦 $(basename "$json_file" .json)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            report "$json_file"
+          done
+        else
+          report "$RESULTS_FILE"
+        fi
+
+        {
+          echo "total-count=$TOTAL"
+          echo "critical-count=$CRITICAL"
+          echo "high-count=$HIGH"
+        } >> "$GITHUB_OUTPUT"
 
         SHOULD_FAIL=false
         if [ -n "$SEVERITY_CUTOFF" ]; then
