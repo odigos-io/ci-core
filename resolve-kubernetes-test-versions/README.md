@@ -24,6 +24,7 @@ With `release: "true"`, the `release-versions` are tested too, e.g. the minimum,
 | `release` | no | `false` | `true` for a release: also test the `release-versions` |
 | `release-versions` | when `release` is `true` | | Comma-separated versions a release also tests, e.g. `1.21.12,1.29,1.37` |
 | `label-prefix` | no | `test-k8s/` | Prefix of the labels that add a version |
+| `github-token` | no | `${{ github.token }}` | Token that reads the PR's labels; needs `pull-requests: read` |
 
 ## Outputs
 
@@ -35,22 +36,22 @@ With `release: "true"`, the `release-versions` are tested too, e.g. the minimum,
 
 Versions are ordered the default first, then the release versions in their given order, then the labelled ones sorted. Each version appears once; the step summary lists where it came from.
 
-Outside of `pull_request` events (no labels in context, e.g. `merge_group`), `versions` is only the default version, plus the release versions for a release.
+Outside of PR events (no PR to read labels from, e.g. `merge_group`), `versions` is only the default version, plus the release versions for a release.
 
 ## Permission Requirements
 
-* `pull-requests: read` — to read PR labels from the event payload.
+* `pull-requests: read` — to read the PR's labels. Without it, the action uses the labels of the event that started the run and logs a warning.
 
 ## Usage
 
-Include `labeled` and `unlabeled` in the workflow's `pull_request` types so adding or removing a label re-runs CI.
+Labels are read from the PR when the job runs, so re-running a run picks up labels added or removed since it started. To re-run CI on a label change, re-run the latest run from a `pull_request_target` workflow on `labeled`/`unlabeled` (see odigos' `pr-label-rerun.yaml`). Adding `labeled`/`unlabeled` to the `pull_request` types also works, but with `cancel-in-progress` concurrency, label events that arrive together (e.g. a bot that opens a PR and labels it) start runs that cancel each other in no fixed order. When the newest run is the one cancelled, its required checks stay "Expected" on the PR.
 
 All versions in one matrix:
 
 ```yaml
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   pull-requests: read
